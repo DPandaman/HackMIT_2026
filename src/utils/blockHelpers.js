@@ -21,6 +21,9 @@ export function evaluateCondition(condition) {
   if (condition.type === "greaterThan") {
     return Number(condition.inputs[0] || 0) > Number(condition.inputs[1] || 0);
   }
+  if (condition.type === "lessThan") {
+    return Number(condition.inputs[0] || 0) < Number(condition.inputs[1] || 0);
+  }
 
   return false;
 }
