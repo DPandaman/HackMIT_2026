@@ -104,6 +104,10 @@ async function runScript() {
   status.textContent = "Ready";
 }
 
+async function reset() {
+  resetSprite();
+}
+
 function projectData() {
   return {
     name: document.querySelector(".project-name").textContent.trim(),
@@ -144,6 +148,7 @@ script.addEventListener("drop", (event) => {
   addToScript(item.type, item.category);
 });
 document.querySelector("#run-button").addEventListener("click", runScript);
+document.querySelector("#reset-button").addEventListener("click", reset);
 document.querySelector("#stop-button").addEventListener("click", () => { running = false; status.textContent = "Stopped"; });
 document.querySelector("#reset-button").addEventListener("click", resetSprite);
 document.querySelector("#clear-button").addEventListener("click", () => {
