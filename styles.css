@@ -187,17 +187,9 @@ h2 {
   background: var(--orange);
 }
 
-.block.condition {
-  background: #ca2f2f;
-}
-
 .block.events {
   background: var(--yellow);
   color: #624d00;
-}
-
-.block.active-block {
-  outline: 3px solid white;
 }
 
 .block input {

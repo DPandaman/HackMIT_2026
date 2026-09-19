@@ -14,6 +14,7 @@ const blockDefinitions = {
   control: [
     { type: "wait", template: ["wait ", { value: "1", type: "number", min: "0", step: "0.1" }, " seconds"] },
     { type: "repeat", template: ["repeat ", { value: "2", type: "number", min: "1" }, " times"] },
+    { type: "if", template: ["if ", { socket: "condition" }, " then"] },
   ],
   condition: [
     {
@@ -50,9 +51,48 @@ function defaultInputs(definition) {
   return definition.template.filter((part) => typeof part === "object").map((part) => part.value);
 }
 
-function Block({ block, paletteBlock = false, active = false, onAdd, onRemove, onInputChange }) {
+function defaultConditionBlock() {
+  const definition = blockDefinitions.condition[0];
+
+  return {
+    id: makeId(),
+    type: definition.type,
+    category: "condition",
+    inputs: defaultInputs(definition),
+  };
+}
+
+function evaluateCondition(condition) {
+  if (!condition) return false;
+
+  if (condition.type === "greaterThan") {
+    return Number(condition.inputs[0] || 0) > Number(condition.inputs[1] || 0);
+  }
+
+  return false;
+}
+
+function blockFromDrop(event) {
+  const raw = event.dataTransfer.getData("text/plain");
+  return raw ? JSON.parse(raw) : null;
+}
+
+function Block({
+  block,
+  paletteBlock = false,
+  active = false,
+  onAdd,
+  onRemove,
+  onInputChange,
+  onConditionDrop,
+  onConditionInputChange,
+}) {
   const definition = findDefinition(block.category, block.type);
   let inputIndex = 0;
+  const blockStyle = {
+    ...(block.category === "condition" ? { background: "#ca2f2f", color: "white" } : {}),
+    ...(active ? { outline: "3px solid white" } : {}),
+  };
 
   if (!definition) return null;
 
@@ -60,16 +100,66 @@ function Block({ block, paletteBlock = false, active = false, onAdd, onRemove, o
     event.dataTransfer.setData("text/plain", JSON.stringify({ type: block.type, category: block.category }));
   }
 
+  function renderConditionSocket(index) {
+    if (paletteBlock) {
+      return (
+        <span key={index} style={{ opacity: 0.78 }}>
+          &lt;condition&gt;
+        </span>
+      );
+    }
+
+    return (
+      <span
+        key={index}
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const item = blockFromDrop(event);
+          if (item?.category === "condition") onConditionDrop(block.id, item.type);
+        }}
+        style={{
+          alignItems: "center",
+          background: "#ffffff38",
+          border: "2px dashed #ffffffb0",
+          borderRadius: 5,
+          display: "inline-flex",
+          minHeight: 32,
+          minWidth: 138,
+          padding: "2px 5px",
+          verticalAlign: "middle",
+        }}
+      >
+        {block.condition ? (
+          <Block
+            block={block.condition}
+            onInputChange={(conditionId, inputIndex, value) => onConditionInputChange(block.id, conditionId, inputIndex, value)}
+          />
+        ) : (
+          <span style={{ color: "white", fontSize: ".8rem", opacity: 0.78 }}>drop condition</span>
+        )}
+      </span>
+    );
+  }
+
   return (
     <div
-      className={`block ${block.category}${active ? " active-block" : ""}`}
+      className={`block ${block.category}`}
+      style={blockStyle}
       draggable
       onClick={paletteBlock ? () => onAdd(block.type, block.category) : undefined}
-      onDoubleClick={!paletteBlock ? () => onRemove(block.id) : undefined}
+      onDoubleClick={!paletteBlock && onRemove ? () => onRemove(block.id) : undefined}
       onDragStart={handleDragStart}
     >
       {definition.template.map((part, index) => {
         if (typeof part === "string") return <React.Fragment key={index}>{part}</React.Fragment>;
+        if (part.socket === "condition") return renderConditionSocket(index);
 
         const currentIndex = inputIndex;
         inputIndex += 1;
@@ -125,6 +215,7 @@ function App() {
         type,
         category: blockCategory,
         inputs: defaultInputs(definition),
+        condition: type === "if" ? defaultConditionBlock() : null,
       },
     ]);
   }
@@ -149,7 +240,18 @@ function App() {
     return {
       name: projectName.trim(),
       spriteName,
-      blocks: blocks.map(({ type, category: blockCategory, inputs }) => ({ type, category: blockCategory, inputs })),
+      blocks: blocks.map(({ type, category: blockCategory, inputs, condition }) => ({
+        type,
+        category: blockCategory,
+        inputs,
+        condition: condition
+          ? {
+              type: condition.type,
+              category: condition.category,
+              inputs: condition.inputs,
+            }
+          : null,
+      })),
     };
   }
 
@@ -168,6 +270,16 @@ function App() {
             type: item.type,
             category: item.category,
             inputs: defaults.map((input, index) => item.inputs?.[index] ?? input),
+            condition: item.condition
+              ? {
+                  id: makeId(),
+                  type: item.condition.type,
+                  category: item.condition.category,
+                  inputs: item.condition.inputs || [],
+                }
+              : item.type === "if"
+                ? defaultConditionBlock()
+                : null,
           };
         })
         .filter(Boolean),
@@ -207,6 +319,10 @@ function App() {
       setStatus(`Repeat ${firstValue || 2} is ready`);
     }
 
+    if (block.type === "if") {
+      setStatus(evaluateCondition(block.condition) ? "If condition is true" : "If condition is false");
+    }
+
     return currentPosition;
   }
 
@@ -219,12 +335,18 @@ function App() {
     resetSprite();
 
     let currentPosition = initialPosition;
-    for (const block of blocks) {
+    for (let index = 0; index < blocks.length; index += 1) {
       if (!runningRef.current) break;
 
+      const block = blocks[index];
       setActiveBlockId(block.id);
       currentPosition = await executeBlock(block, currentPosition);
       setPosition(currentPosition);
+
+      if (block.type === "if" && !evaluateCondition(block.condition)) {
+        index += 1;
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
 
@@ -253,8 +375,46 @@ function App() {
   function handleDrop(event) {
     event.preventDefault();
     setDragOver(false);
-    const item = JSON.parse(event.dataTransfer.getData("text/plain"));
+    const item = blockFromDrop(event);
+    if (!item) return;
     addToScript(item.type, item.category);
+  }
+
+  function dropCondition(blockId, conditionType) {
+    const definition = findDefinition("condition", conditionType);
+    if (!definition) return;
+
+    setBlocks((currentBlocks) =>
+      currentBlocks.map((block) =>
+        block.id === blockId
+          ? {
+              ...block,
+              condition: {
+                id: makeId(),
+                type: conditionType,
+                category: "condition",
+                inputs: defaultInputs(definition),
+              },
+            }
+          : block,
+      ),
+    );
+  }
+
+  function updateConditionInput(blockId, conditionId, inputIndex, value) {
+    setBlocks((currentBlocks) =>
+      currentBlocks.map((block) =>
+        block.id === blockId && block.condition?.id === conditionId
+          ? {
+              ...block,
+              condition: {
+                ...block.condition,
+                inputs: block.condition.inputs.map((input, index) => (index === inputIndex ? value : input)),
+              },
+            }
+          : block,
+      ),
+    );
   }
 
   return (
@@ -330,6 +490,8 @@ function App() {
                   active={activeBlockId === block.id}
                   onRemove={(id) => setBlocks((currentBlocks) => currentBlocks.filter((item) => item.id !== id))}
                   onInputChange={updateBlockInput}
+                  onConditionDrop={dropCondition}
+                  onConditionInputChange={updateConditionInput}
                 />
               ))
             )}
