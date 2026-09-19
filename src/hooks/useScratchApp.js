@@ -81,10 +81,10 @@ export function useScratchApp() {
         inputs,
         condition: condition
           ? {
-              type: condition.type,
-              category: condition.category,
-              inputs: condition.inputs,
-            }
+            type: condition.type,
+            category: condition.category,
+            inputs: condition.inputs,
+          }
           : null,
       })),
     };
@@ -125,13 +125,27 @@ export function useScratchApp() {
   async function executeBlock(block, currentPosition) {
     const firstValue = block.inputs[0];
 
-    if (block.type === "move") return moveSprite(currentPosition, Number(firstValue || 10));
-    if (block.type === "turn") return { ...currentPosition, rotation: currentPosition.rotation + Number(firstValue || 15) };
-    if (block.type === "say") setSpeech(firstValue || "Hello!");
-    if (block.type === "hide") setSpriteHidden(true);
-    if (block.type === "wait") await wait(Number(firstValue || 1));
-    if (block.type === "repeat") setStatus(`Repeat ${firstValue || 2} is ready`);
-    if (block.type === "if") setStatus(evaluateCondition(block.condition) ? "If condition is true" : "If condition is false");
+    if (block.type === "move") {
+      return moveSprite(currentPosition, Number(firstValue || 10));
+    }
+    if (block.type === "turn") {
+      return { ...currentPosition, rotation: currentPosition.rotation + Number(firstValue || 15) };
+    }
+    if (block.type === "say") {
+      setSpeech(firstValue || "Hello!");
+    }
+    if (block.type === "hide") {
+      setSpriteHidden(true);
+    }
+    if (block.type === "wait") {
+      await wait(Number(firstValue || 1));
+    }
+    if (block.type === "repeat") {
+      setStatus(`Repeat ${firstValue || 2} is ready`);
+    }
+    if (block.type === "if") {
+      setStatus(evaluateCondition(block.condition) ? "If condition is true" : "If condition is false");
+    }
 
     return currentPosition;
   }
@@ -204,14 +218,14 @@ export function useScratchApp() {
       currentBlocks.map((block) =>
         block.id === blockId
           ? {
-              ...block,
-              condition: {
-                id: makeId(),
-                type: conditionType,
-                category: "condition",
-                inputs: defaultInputs(definition),
-              },
-            }
+            ...block,
+            condition: {
+              id: makeId(),
+              type: conditionType,
+              category: "condition",
+              inputs: defaultInputs(definition),
+            },
+          }
           : block,
       ),
     );
@@ -222,12 +236,12 @@ export function useScratchApp() {
       currentBlocks.map((block) =>
         block.id === blockId && block.condition?.id === conditionId
           ? {
-              ...block,
-              condition: {
-                ...block.condition,
-                inputs: block.condition.inputs.map((input, index) => (index === inputIndex ? value : input)),
-              },
-            }
+            ...block,
+            condition: {
+              ...block.condition,
+              inputs: block.condition.inputs.map((input, index) => (index === inputIndex ? value : input)),
+            },
+          }
           : block,
       ),
     );

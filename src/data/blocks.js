@@ -21,6 +21,14 @@ export const blockDefinitions = {
         { value: "1", type: "number", min: "0", step: "0.1" },
       ],
     },
+    {
+      type: "lessThan",
+      template: [
+        { value: "1", type: "number", min: "0", step: "0.1" },
+        " < ",
+        { value: "2", type: "number", min: "0", step: "0.1" },
+      ],
+    },
   ],
   events: [{ type: "flag", template: ["when 🚩 clicked"] }],
 };
