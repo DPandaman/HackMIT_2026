@@ -65,6 +65,24 @@ footer { height: 36px; display: flex; align-items: center; justify-content: cent
   position: relative;
 }
 
+.block-children {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  margin-left: 18px;
+  padding: 8px 0 0 10px;
+  border-left: 2px solid rgba(255, 255, 255, 0.5);
+  min-height: 34px;
+}
+
+.block-drop-hint {
+  display: inline-block;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
 .delete-block {
   margin-left: 8px;
   width: 22px;

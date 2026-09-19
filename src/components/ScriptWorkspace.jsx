@@ -4,6 +4,7 @@ export function ScriptWorkspace({
   activeBlockId,
   blocks,
   dragOver,
+  onAdd,
   onBlockInputChange,
   onConditionDrop,
   onConditionInputChange,
@@ -31,6 +32,7 @@ export function ScriptWorkspace({
             key={block.id}
             block={block}
             active={activeBlockId === block.id}
+            onAdd={onAdd}
             onRemove={onDeleteBlock}
             onInputChange={onBlockInputChange}
             onConditionDrop={onConditionDrop}

@@ -29,34 +29,84 @@ export function useScratchApp() {
     [category],
   );
 
-  function addToScript(type, blockCategory) {
+  function appendBlockToTree(blocks, parentId, newBlock) {
+    if (!parentId) return [...blocks, newBlock];
+
+    return blocks.map((block) => {
+      if (block.id === parentId) {
+        return {
+          ...block,
+          children: [...(Array.isArray(block.children) ? block.children : []), newBlock],
+        };
+      }
+
+      if (Array.isArray(block.children) && block.children.length > 0) {
+        return {
+          ...block,
+          children: appendBlockToTree(block.children, parentId, newBlock),
+        };
+      }
+
+      return block;
+    });
+  }
+
+  function updateBlockTree(blocks, blockId, updater) {
+    return blocks.map((block) => {
+      if (block.id === blockId) return updater(block);
+
+      if (Array.isArray(block.children) && block.children.length > 0) {
+        return {
+          ...block,
+          children: updateBlockTree(block.children, blockId, updater),
+        };
+      }
+
+      return block;
+    });
+  }
+
+  function removeBlockTree(blocks, blockId) {
+    return blocks.flatMap((block) => {
+      if (block.id === blockId) return [];
+
+      if (Array.isArray(block.children) && block.children.length > 0) {
+        return [{ ...block, children: removeBlockTree(block.children, blockId) }];
+      }
+
+      return [block];
+    });
+  }
+
+  function addToScript(type, blockCategory, parentId = null) {
     const definition = findDefinition(blockCategory, type);
     if (!definition) return;
 
-    setBlocks((currentBlocks) => [
-      ...currentBlocks,
-      {
-        id: makeId(),
-        type,
-        category: blockCategory,
-        inputs: defaultInputs(definition),
-        condition: type === "if" ? defaultConditionBlock() : null,
-      },
-    ]);
+    const newBlock = {
+      id: makeId(),
+      type,
+      category: blockCategory,
+      inputs: defaultInputs(definition),
+      condition: type === "if" ? defaultConditionBlock() : null,
+      children: ["repeat", "if"].includes(type) ? [] : undefined,
+    };
+
+    setBlocks((currentBlocks) =>
+      parentId ? appendBlockToTree(currentBlocks, parentId, newBlock) : [...currentBlocks, newBlock],
+    );
   }
 
   function updateBlockInput(id, inputIndex, value) {
     setBlocks((currentBlocks) =>
-      currentBlocks.map((block) =>
-        block.id === id
-          ? { ...block, inputs: block.inputs.map((input, index) => (index === inputIndex ? value : input)) }
-          : block,
-      ),
+      updateBlockTree(currentBlocks, id, (block) => ({
+        ...block,
+        inputs: block.inputs.map((input, index) => (index === inputIndex ? value : input)),
+      })),
     );
   }
 
   function deleteBlock(id) {
-    setBlocks((currentBlocks) => currentBlocks.filter((block) => block.id !== id));
+    setBlocks((currentBlocks) => removeBlockTree(currentBlocks, id));
     if (activeBlockId === id) setActiveBlockId(null);
   }
 
@@ -89,18 +139,23 @@ export function useScratchApp() {
   //     })),
   //   };
   // }
+  function serializeBlock(block) {
+    return {
+      type: block.type,
+      category: block.category,
+      inputs: block.inputs,
+      condition: serializeCondition(block.condition),
+      children: Array.isArray(block.children)
+        ? block.children.map((child) => serializeBlock(child))
+        : undefined,
+    };
+  }
+
   function projectData() {
     return {
       name: projectName.trim(),
       spriteName,
-      blocks: blocks.map(
-        ({ type, category: blockCategory, inputs, condition }) => ({
-          type,
-          category: blockCategory,
-          inputs,
-          condition: serializeCondition(condition),
-        })
-      ),
+      blocks: blocks.map((block) => serializeBlock(block)),
     };
   }
 
@@ -145,6 +200,11 @@ export function useScratchApp() {
       category: item.category,
       inputs: defaults.map((input, index) => item.inputs?.[index] ?? input),
       condition: hydrateSavedCondition(item),
+      children: Array.isArray(item.children)
+        ? item.children.map((child) => hydrateSavedBlock(child)).filter(Boolean)
+        : ["repeat", "if"].includes(item.type)
+          ? []
+          : undefined,
     };
   }
 
@@ -187,13 +247,39 @@ export function useScratchApp() {
       await wait(Number(firstValue || 1));
     }
     if (block.type === "repeat") {
-      setStatus(`Repeat ${firstValue || 2} is ready`);
+      setStatus(`Repeat ${firstValue || 2} times`);
     }
     if (block.type === "if") {
       setStatus(evaluateCondition(block.condition) ? "If condition is true" : "If condition is false");
     }
 
     return currentPosition;
+  }
+
+  async function executeBlockList(blockList, currentPosition) {
+    let nextPosition = currentPosition;
+
+    for (const nestedBlock of blockList) {
+      if (!runningRef.current) break;
+
+      setActiveBlockId(nestedBlock.id);
+      nextPosition = await executeBlock(nestedBlock, nextPosition);
+      setPosition(nextPosition);
+      await wait(0.25);
+    }
+
+    return nextPosition;
+  }
+
+  async function executeRepeatedBlock(blockList, currentPosition, count) {
+    let nextPosition = currentPosition;
+
+    for (let iteration = 0; iteration < count; iteration += 1) {
+      if (!runningRef.current) break;
+      nextPosition = await executeBlockList(blockList, nextPosition);
+    }
+
+    return nextPosition;
   }
 
   async function runScript() {
@@ -213,7 +299,39 @@ export function useScratchApp() {
       currentPosition = await executeBlock(block, currentPosition);
       setPosition(currentPosition);
 
-      if (block.type === "if" && !evaluateCondition(block.condition)) index += 1;
+      if (block.type === "repeat") {
+        const repeatCount = Math.max(0, Math.floor(Number(block.inputs[0] || 0)));
+        const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
+        const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
+
+        if (repeatCount > 0 && childBlocks.length > 0) {
+          const body = Array.isArray(block.children) && block.children.length > 0
+            ? block.children
+            : blocks.slice(index + 1, bodyEndIndex);
+          currentPosition = await executeRepeatedBlock(body, currentPosition, repeatCount);
+
+          if (!Array.isArray(block.children) || block.children.length === 0) {
+            index = bodyEndIndex - 1;
+          }
+        }
+      }
+
+      if (block.type === "if") {
+        const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
+        const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
+
+        if (evaluateCondition(block.condition)) {
+          if (childBlocks.length > 0) {
+            const body = Array.isArray(block.children) && block.children.length > 0
+              ? block.children
+              : blocks.slice(index + 1, bodyEndIndex);
+            currentPosition = await executeBlockList(body, currentPosition);
+          }
+        } else if (!Array.isArray(block.children) || block.children.length === 0) {
+          index = bodyEndIndex - 1;
+        }
+      }
+
       await wait(0.25);
     }
 
@@ -329,11 +447,7 @@ export function useScratchApp() {
     if (!newCondition) return;
 
     setBlocks((currentBlocks) =>
-      currentBlocks.map((block) => {
-        if (block.id !== blockId) {
-          return block;
-        }
-
+      updateBlockTree(currentBlocks, blockId, (block) => {
         if (!targetConditionId) {
           return {
             ...block,
@@ -407,19 +521,15 @@ export function useScratchApp() {
     value
   ) {
     setBlocks((currentBlocks) =>
-      currentBlocks.map((block) =>
-        block.id === blockId
-          ? {
-            ...block,
-            condition: updateNestedCondition(
-              block.condition,
-              conditionId,
-              inputIndex,
-              value
-            ),
-          }
-          : block
-      )
+      updateBlockTree(currentBlocks, blockId, (block) => ({
+        ...block,
+        condition: updateNestedCondition(
+          block.condition,
+          conditionId,
+          inputIndex,
+          value
+        ),
+      }))
     );
   }
 

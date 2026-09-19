@@ -41,6 +41,7 @@ export function App() {
             activeBlockId={scratch.activeBlockId}
             blocks={scratch.blocks}
             dragOver={scratch.dragOver}
+            onAdd={scratch.addToScript}
             onBlockInputChange={scratch.updateBlockInput}
             onConditionDrop={scratch.dropCondition}
             onConditionInputChange={scratch.updateConditionInput}

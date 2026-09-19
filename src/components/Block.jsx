@@ -75,6 +75,15 @@ export function Block({
     );
   }
 
+  function handleBodyDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const item = blockFromDrop(event);
+    if (item) onAdd(item.type, item.category, block.id);
+  }
+
+  const canWrapChildren = !paletteBlock && ["repeat", "if"].includes(block.type);
+
   return (
     <div
       className={`block ${block.category}`}
@@ -104,6 +113,34 @@ export function Block({
           />
         );
       })}
+
+      {canWrapChildren && (
+        <div
+          className="block-children"
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onDrop={handleBodyDrop}
+        >
+          {Array.isArray(block.children) && block.children.length > 0 ? (
+            block.children.map((child) => (
+              <Block
+                key={child.id}
+                block={child}
+                active={active}
+                onAdd={onAdd}
+                onRemove={onRemove}
+                onInputChange={onInputChange}
+                onConditionDrop={onConditionDrop}
+                onConditionInputChange={onConditionInputChange}
+              />
+            ))
+          ) : (
+            <span className="block-drop-hint">drop block here</span>
+          )}
+        </div>
+      )}
 
       {!paletteBlock && onRemove && (
         <button
