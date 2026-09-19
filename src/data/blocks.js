@@ -12,6 +12,29 @@ export const blockDefinitions = {
     { type: "repeat", template: ["repeat ", { value: "2", type: "number", min: "1" }, " times"] },
     { type: "if", template: ["if ", { socket: "condition" }, " then"] },
   ],
+  // condition: [
+  //   {
+  //     type: "greaterThan",
+  //     template: [
+  //       { value: "2", type: "number", min: "0", step: "0.1" },
+  //       " > ",
+  //       { value: "1", type: "number", min: "0", step: "0.1" },
+  //     ],
+  //   },
+  //   {
+  //     type: "lessThan",
+  //     template: [
+  //       { value: "1", type: "number", min: "0", step: "0.1" },
+  //       " < ",
+  //       { value: "2", type: "number", min: "0", step: "0.1" },
+  //     ],
+  //   },
+  //   {
+  //     type: "not",
+  //     template: ["not ", { socket: "condition" },
+  //     ],
+  //   },
+  // ],
   condition: [
     {
       type: "greaterThan",
@@ -27,6 +50,13 @@ export const blockDefinitions = {
         { value: "1", type: "number", min: "0", step: "0.1" },
         " < ",
         { value: "2", type: "number", min: "0", step: "0.1" },
+      ],
+    },
+    {
+      type: "not",
+      template: [
+        "not ",
+        { socket: "condition" },
       ],
     },
   ],
@@ -45,6 +75,15 @@ export function findDefinition(category, type) {
   return blockDefinitions[category]?.find((definition) => definition.type === type);
 }
 
+// export function defaultInputs(definition) {
+//   return definition.template.filter((part) => typeof part === "object").map((part) => part.value);
+// }
 export function defaultInputs(definition) {
-  return definition.template.filter((part) => typeof part === "object").map((part) => part.value);
+  return definition.template
+    .filter(
+      (part) =>
+        typeof part === "object" &&
+        Object.prototype.hasOwnProperty.call(part, "value")
+    )
+    .map((part) => part.value);
 }

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { blockDefinitions, defaultInputs, findDefinition } from "../data/blocks";
-import { blockFromDrop, defaultConditionBlock, evaluateCondition, makeId } from "../utils/blockHelpers";
+import { blockFromDrop, defaultConditionBlock, evaluateCondition, makeId, createCondition } from "../utils/blockHelpers";
 import { moveSprite, wait } from "../utils/runtime";
 
 const initialPosition = { x: 50, y: 52, rotation: 0 };
@@ -71,22 +71,59 @@ export function useScratchApp() {
     setSpeech("");
   }
 
+  // function projectData() {
+  //   return {
+  //     name: projectName.trim(),
+  //     spriteName,
+  //     blocks: blocks.map(({ type, category: blockCategory, inputs, condition }) => ({
+  //       type,
+  //       category: blockCategory,
+  //       inputs,
+  //       condition: condition
+  //         ? {
+  //           type: condition.type,
+  //           category: condition.category,
+  //           inputs: condition.inputs,
+  //         }
+  //         : null,
+  //     })),
+  //   };
+  // }
   function projectData() {
     return {
       name: projectName.trim(),
       spriteName,
-      blocks: blocks.map(({ type, category: blockCategory, inputs, condition }) => ({
-        type,
-        category: blockCategory,
-        inputs,
-        condition: condition
-          ? {
-            type: condition.type,
-            category: condition.category,
-            inputs: condition.inputs,
-          }
-          : null,
-      })),
+      blocks: blocks.map(
+        ({ type, category: blockCategory, inputs, condition }) => ({
+          type,
+          category: blockCategory,
+          inputs,
+          condition: serializeCondition(condition),
+        })
+      ),
+    };
+  }
+
+  function hydrateCondition(condition) {
+    if (!condition) return null;
+
+    const definition = findDefinition(
+      condition.category,
+      condition.type
+    );
+
+    if (!definition) return null;
+
+    const defaults = defaultInputs(definition);
+
+    return {
+      id: makeId(),
+      type: condition.type,
+      category: condition.category,
+      inputs: defaults.map(
+        (input, index) => condition.inputs?.[index] ?? input
+      ),
+      condition: hydrateCondition(condition.condition),
     };
   }
 
@@ -111,15 +148,24 @@ export function useScratchApp() {
     };
   }
 
-  function hydrateSavedCondition(item) {
-    if (!item.condition) return item.type === "if" ? defaultConditionBlock() : null;
+  // function hydrateSavedCondition(item) {
+  //   if (!item.condition) return item.type === "if" ? defaultConditionBlock() : null;
 
-    return {
-      id: makeId(),
-      type: item.condition.type,
-      category: item.condition.category,
-      inputs: item.condition.inputs || [],
-    };
+  //   return {
+  //     id: makeId(),
+  //     type: item.condition.type,
+  //     category: item.condition.category,
+  //     inputs: item.condition.inputs || [],
+  //   };
+  // }
+  function hydrateSavedCondition(item) {
+    if (!item.condition) {
+      return item.type === "if"
+        ? defaultConditionBlock()
+        : null;
+    }
+
+    return hydrateCondition(item.condition);
   }
 
   async function executeBlock(block, currentPosition) {
@@ -210,40 +256,170 @@ export function useScratchApp() {
     if (item) addToScript(item.type, item.category);
   }
 
-  function dropCondition(blockId, conditionType) {
-    const definition = findDefinition("condition", conditionType);
-    if (!definition) return;
+  // function dropCondition(blockId, conditionType) {
+  //   const definition = findDefinition("condition", conditionType);
+  //   if (!definition) return;
 
+  //   setBlocks((currentBlocks) =>
+  //     currentBlocks.map((block) =>
+  //       block.id === blockId
+  //         ? {
+  //           ...block,
+  //           condition: {
+  //             id: makeId(),
+  //             type: conditionType,
+  //             category: "condition",
+  //             inputs: defaultInputs(definition),
+  //           },
+  //         }
+  //         : block,
+  //     ),
+  //   );
+  // }
+  function replaceConditionInside(
+    condition,
+    targetConditionId,
+    newCondition
+  ) {
+    if (!condition) return condition;
+
+    if (
+      condition.id === targetConditionId &&
+      condition.type === "not"
+    ) {
+      return {
+        ...condition,
+        condition: newCondition,
+      };
+    }
+
+    if (condition.condition) {
+      return {
+        ...condition,
+        condition: replaceConditionInside(
+          condition.condition,
+          targetConditionId,
+          newCondition
+        ),
+      };
+    }
+
+    return condition;
+  }
+
+  function serializeCondition(condition) {
+    if (!condition) return null;
+
+    return {
+      type: condition.type,
+      category: condition.category,
+      inputs: condition.inputs,
+      condition: serializeCondition(condition.condition),
+    };
+  }
+
+
+  function dropCondition(
+    blockId,
+    conditionType,
+    targetConditionId = null
+  ) {
+    const newCondition = createCondition(conditionType);
+
+    if (!newCondition) return;
+
+    setBlocks((currentBlocks) =>
+      currentBlocks.map((block) => {
+        if (block.id !== blockId) {
+          return block;
+        }
+
+        if (!targetConditionId) {
+          return {
+            ...block,
+            condition: newCondition,
+          };
+        }
+
+        return {
+          ...block,
+          condition: replaceConditionInside(
+            block.condition,
+            targetConditionId,
+            newCondition
+          ),
+        };
+      })
+    );
+  }
+
+  function updateNestedCondition(
+    condition,
+    conditionId,
+    inputIndex,
+    value
+  ) {
+    if (!condition) return condition;
+
+    if (condition.id === conditionId) {
+      return {
+        ...condition,
+        inputs: condition.inputs.map((input, index) =>
+          index === inputIndex ? value : input
+        ),
+      };
+    }
+
+    if (condition.condition) {
+      return {
+        ...condition,
+        condition: updateNestedCondition(
+          condition.condition,
+          conditionId,
+          inputIndex,
+          value
+        ),
+      };
+    }
+
+    return condition;
+  }
+
+  // function updateConditionInput(blockId, conditionId, inputIndex, value) {
+  //   setBlocks((currentBlocks) =>
+  //     currentBlocks.map((block) =>
+  //       block.id === blockId && block.condition?.id === conditionId
+  //         ? {
+  //           ...block,
+  //           condition: {
+  //             ...block.condition,
+  //             inputs: block.condition.inputs.map((input, index) => (index === inputIndex ? value : input)),
+  //           },
+  //         }
+  //         : block,
+  //     ),
+  //   );
+  // }
+  function updateConditionInput(
+    blockId,
+    conditionId,
+    inputIndex,
+    value
+  ) {
     setBlocks((currentBlocks) =>
       currentBlocks.map((block) =>
         block.id === blockId
           ? {
             ...block,
-            condition: {
-              id: makeId(),
-              type: conditionType,
-              category: "condition",
-              inputs: defaultInputs(definition),
-            },
+            condition: updateNestedCondition(
+              block.condition,
+              conditionId,
+              inputIndex,
+              value
+            ),
           }
-          : block,
-      ),
-    );
-  }
-
-  function updateConditionInput(blockId, conditionId, inputIndex, value) {
-    setBlocks((currentBlocks) =>
-      currentBlocks.map((block) =>
-        block.id === blockId && block.condition?.id === conditionId
-          ? {
-            ...block,
-            condition: {
-              ...block.condition,
-              inputs: block.condition.inputs.map((input, index) => (index === inputIndex ? value : input)),
-            },
-          }
-          : block,
-      ),
+          : block
+      )
     );
   }
 
