@@ -37,15 +37,15 @@ export function wait(seconds) {
 
 const AI_ENDPOINT = "/api/ask";
 
-export async function askAI(prompt) {
+export async function askAI(prompt, kind = "text") {
   const trimmedPrompt = (prompt || "").trim();
-  if (!trimmedPrompt) return "(no prompt given)";
+  if (!trimmedPrompt) return kind === "number" ? "0" : "(no prompt given)";
 
   try {
     const response = await fetch(AI_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: trimmedPrompt }),
+      body: JSON.stringify({ prompt: trimmedPrompt, kind }),
     });
 
     if (!response.ok) {
@@ -54,10 +54,10 @@ export async function askAI(prompt) {
     }
 
     const data = await response.json();
-    return data.answer || "(AI returned nothing)";
+    return data.answer ?? (kind === "number" ? "0" : "(AI returned nothing)");
   } catch (error) {
     console.error("askAI error:", error);
-    return "(AI is unavailable right now)";
+    return kind === "number" ? "0" : "(AI is unavailable right now)";
   }
 }
 

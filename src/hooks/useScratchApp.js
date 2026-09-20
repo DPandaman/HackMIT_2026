@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { blockDefinitions, defaultInputs, findDefinition } from "../data/blocks";
-import { blockFromDrop, defaultConditionBlock, evaluateCondition, makeId, createCondition } from "../utils/blockHelpers";
+import { blockFromDrop, defaultConditionBlock, makeId, createCondition, isAIValue, createAIValue } from "../utils/blockHelpers";
 import {
   askAI,
   moveSprite,
@@ -130,6 +130,36 @@ export function useScratchApp() {
     );
   }
 
+  function dropAIValue(blockId, inputIndex, kind) {
+    setBlocks((currentBlocks) =>
+      updateBlockTree(currentBlocks, blockId, (block) => ({
+        ...block,
+        inputs: block.inputs.map((input, index) => (index === inputIndex ? createAIValue(kind) : input)),
+      })),
+    );
+  }
+
+  function updateAIPrompt(blockId, inputIndex, prompt) {
+    setBlocks((currentBlocks) =>
+      updateBlockTree(currentBlocks, blockId, (block) => ({
+        ...block,
+        inputs: block.inputs.map((input, index) =>
+          index === inputIndex && isAIValue(input) ? { ...input, prompt, lastAnswer: null } : input,
+        ),
+      })),
+    );
+  }
+
+  // Reverts an AI-driven slot back to a plain typed value.
+  function clearAIValue(blockId, inputIndex, defaultValue) {
+    setBlocks((currentBlocks) =>
+      updateBlockTree(currentBlocks, blockId, (block) => ({
+        ...block,
+        inputs: block.inputs.map((input, index) => (index === inputIndex ? defaultValue : input)),
+      })),
+    );
+  }
+
   function deleteBlock(id) {
     setBlocks((currentBlocks) => removeBlockTree(currentBlocks, id));
     if (activeBlockId === id) setActiveBlockId(null);
@@ -226,14 +256,40 @@ export function useScratchApp() {
     return hydrateCondition(item.condition);
   }
 
+  async function resolveFirstValue(block) {
+    const raw = block.inputs?.[0];
+
+    if (!isAIValue(raw)) return raw;
+
+    setStatus("Asking AI\u2026");
+    const answer = await askAI(raw.prompt, raw.kind);
+    const resolved = raw.kind === "number" ? Number(answer) : answer;
+    const displayAnswer = raw.kind === "number" ? String(Number.isNaN(resolved) ? 0 : resolved) : answer;
+
+    setBlocks((currentBlocks) =>
+      updateBlockTree(currentBlocks, block.id, (currentBlock) => ({
+        ...currentBlock,
+        inputs: currentBlock.inputs.map((input, index) =>
+          index === 0 && isAIValue(input) ? { ...input, lastAnswer: displayAnswer } : input,
+        ),
+      })),
+    );
+
+    return raw.kind === "number" ? (Number.isNaN(resolved) ? 0 : resolved) : resolved;
+  }
+
   async function executeBlock(block, currentPosition) {
-    const firstValue = block.inputs[0];
+    const firstValue = await resolveFirstValue(block);
+    let conditionResult;
 
     if (block.type === "move") {
-      return moveSprite(currentPosition, Number(firstValue || 10));
+      return { position: moveSprite(currentPosition, Number(firstValue || 10)), value: firstValue };
     }
     if (block.type === "turn") {
-      return { ...currentPosition, rotation: currentPosition.rotation + Number(firstValue || 15) };
+      return {
+        position: { ...currentPosition, rotation: currentPosition.rotation + Number(firstValue || 15) },
+        value: firstValue,
+      };
     }
     if (block.type === "say") {
       setSpeech(firstValue || "Hello!");
@@ -248,11 +304,12 @@ export function useScratchApp() {
       setStatus(`Repeat ${firstValue || 2} times`);
     }
     if (block.type === "if") {
-      setStatus(evaluateCondition(block.condition) ? "If condition is true" : "If condition is false");
+      conditionResult = await resolveConditionToBoolean(block.id, block.condition);
+      setStatus(conditionResult ? "If condition is true" : "If condition is false");
     }
     if (block.type === "askAI") {
       setStatus("Asking AI\u2026");
-      const answer = await askAI(firstValue);
+      const answer = await askAI(firstValue, "text");
       setSpeech(answer);
       setStatus("Running");
     }
@@ -261,35 +318,35 @@ export function useScratchApp() {
       await connectArduino(setSerialOutput);
       setArduinoConnected(true);
       setStatus("Arduino connected");
-      return currentPosition;
+      return { position: currentPosition, value: firstValue };
     }
 
     if (block.type === "arduinoSend") {
-      const message = block.inputs?.[0] ?? "";
+      const message = firstValue ?? "";
       await sendArduino(message, setSerialOutput);
       setStatus(`Sent to Arduino: ${message}`);
-      return currentPosition;
+      return { position: currentPosition, value: firstValue };
     }
 
     if (block.type === "arduinoDisconnect") {
       await disconnectArduino();
       setArduinoConnected(false);
       setStatus("Arduino disconnected");
-      return currentPosition;
+      return { position: currentPosition, value: firstValue };
     }
 
     if (block.type === "whenHear") {
-      const targetPhrase = block.inputs?.[0] ?? "hello";
+      const targetPhrase = firstValue ?? "hello";
       setStatus(`Listening for "${targetPhrase}"...`);
       setVoiceListening(true);
-      
+
       const heard = await waitForPhrase(targetPhrase, 30000); // 30 second timeout
-      
+
       setVoiceListening(false);
-      
+
       if (heard) {
         setStatus(`Heard "${targetPhrase}"!`);
-        
+
         // Execute child blocks if phrase was heard
         const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : [];
         if (childBlocks.length > 0) {
@@ -341,7 +398,8 @@ export function useScratchApp() {
       if (!runningRef.current) break;
 
       setActiveBlockId(nestedBlock.id);
-      nextPosition = await executeBlock(nestedBlock, nextPosition);
+      const result = await executeBlock(nestedBlock, nextPosition);
+      nextPosition = result.position;
       setPosition(nextPosition);
       await wait(0.25);
     }
@@ -386,11 +444,12 @@ export function useScratchApp() {
 
       const block = blocks[index];
       setActiveBlockId(block.id);
-      currentPosition = await executeBlock(block, currentPosition);
+      const result = await executeBlock(block, currentPosition);
+      currentPosition = result.position;
       setPosition(currentPosition);
 
       if (block.type === "repeat") {
-        const repeatCount = Math.max(0, Math.floor(Number(block.inputs[0] || 0)));
+        const repeatCount = Math.max(0, Math.floor(Number(result.value || 0)));
         const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
         const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
 
@@ -410,7 +469,7 @@ export function useScratchApp() {
         const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
         const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
 
-        if (evaluateCondition(block.condition)) {
+        if (result.conditionResult) {
           if (childBlocks.length > 0) {
             const body = Array.isArray(block.children) && block.children.length > 0
               ? block.children
@@ -592,6 +651,118 @@ export function useScratchApp() {
     );
   }
 
+  function updateNestedConditionInputs(condition, conditionId, inputIndex, updater) {
+    if (!condition) return condition;
+
+    if (condition.id === conditionId) {
+      return {
+        ...condition,
+        inputs: condition.inputs.map((input, index) => (index === inputIndex ? updater(input) : input)),
+      };
+    }
+
+    if (condition.condition) {
+      return {
+        ...condition,
+        condition: updateNestedConditionInputs(condition.condition, conditionId, inputIndex, updater),
+      };
+    }
+
+    return condition;
+  }
+
+  function updateNestedConditionSelf(condition, conditionId, updater) {
+    if (!condition) return condition;
+    if (condition.id === conditionId) return updater(condition);
+
+    if (condition.condition) {
+      return { ...condition, condition: updateNestedConditionSelf(condition.condition, conditionId, updater) };
+    }
+
+    return condition;
+  }
+
+  function dropConditionAIValue(blockId, conditionId, inputIndex, kind) {
+    setBlocks((currentBlocks) =>
+      updateBlockTree(currentBlocks, blockId, (block) => ({
+        ...block,
+        condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, () => createAIValue(kind)),
+      }))
+    );
+  }
+
+  function updateConditionAIPrompt(blockId, conditionId, inputIndex, prompt) {
+    setBlocks((currentBlocks) =>
+      updateBlockTree(currentBlocks, blockId, (block) => ({
+        ...block,
+        condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, (input) =>
+          isAIValue(input) ? { ...input, prompt, lastAnswer: null } : input,
+        ),
+      }))
+    );
+  }
+
+  function clearConditionAIValue(blockId, conditionId, inputIndex, defaultValue) {
+    setBlocks((currentBlocks) =>
+      updateBlockTree(currentBlocks, blockId, (block) => ({
+        ...block,
+        condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, () => defaultValue),
+      }))
+    );
+  }
+
+  async function resolveConditionInputValue(blockId, condition, index) {
+    const raw = condition.inputs?.[index];
+    if (!isAIValue(raw)) return raw;
+
+    setStatus("Asking AI\u2026");
+    const answer = await askAI(raw.prompt, raw.kind);
+    const resolved = raw.kind === "number" ? Number(answer) : answer;
+    const displayAnswer = raw.kind === "number" ? String(Number.isNaN(resolved) ? 0 : resolved) : answer;
+
+    setBlocks((currentBlocks) =>
+      updateBlockTree(currentBlocks, blockId, (block) => ({
+        ...block,
+        condition: updateNestedConditionInputs(block.condition, condition.id, index, (input) =>
+          isAIValue(input) ? { ...input, lastAnswer: displayAnswer } : input,
+        ),
+      })),
+    );
+
+    return raw.kind === "number" ? (Number.isNaN(resolved) ? 0 : resolved) : resolved;
+  }
+
+  async function resolveConditionToBoolean(blockId, condition) {
+    if (!condition) return false;
+
+    if (condition.type === "not") {
+      return !(await resolveConditionToBoolean(blockId, condition.condition));
+    }
+
+    if (condition.type === "aiCondition") {
+      const prompt = await resolveConditionInputValue(blockId, condition, 0);
+      setStatus("Asking AI\u2026");
+      const answer = await askAI(String(prompt ?? ""), "boolean");
+
+      setBlocks((currentBlocks) =>
+        updateBlockTree(currentBlocks, blockId, (block) => ({
+          ...block,
+          condition: updateNestedConditionSelf(block.condition, condition.id, (node) => ({ ...node, lastAnswer: answer })),
+        })),
+      );
+
+      return /^(true|yes)/i.test(String(answer).trim());
+    }
+
+    if (condition.type === "greaterThan" || condition.type === "lessThan") {
+      const left = await resolveConditionInputValue(blockId, condition, 0);
+      const right = await resolveConditionInputValue(blockId, condition, 1);
+      return condition.type === "greaterThan" ? Number(left || 0) > Number(right || 0) : Number(left || 0) < Number(right || 0);
+    }
+
+    return false;
+  }
+
   return {
     activeBlockId,
     addToScript,
@@ -620,6 +791,12 @@ export function useScratchApp() {
     stopScript,
     updateBlockInput,
     updateConditionInput,
+    dropAIValue,
+    updateAIPrompt,
+    clearAIValue,
+    dropConditionAIValue,
+    updateConditionAIPrompt,
+    clearConditionAIValue,
 
     arduinoConnected,
     serialOutput,
