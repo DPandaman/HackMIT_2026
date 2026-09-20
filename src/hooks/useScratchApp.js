@@ -6,6 +6,7 @@ import {
   moveSprite,
   wait,
   connectArduino,
+  isKeyPressed,
   disconnectArduino,
   sendArduino,
   isArduinoConnected,
@@ -112,8 +113,8 @@ export function useScratchApp() {
       type,
       category: blockCategory,
       inputs: defaultInputs(definition),
-      condition: type === "if" ? defaultConditionBlock() : null,
-      children: ["repeat", "if", "whenHear"].includes(type) ? [] : undefined,
+      condition: ["if", "waitUntil"].includes(type) ? defaultConditionBlock() : null,
+      children: ["repeat", "if", "waitUntil", "whenHear"].includes(type) ? [] : undefined,
     };
 
     setBlocks((currentBlocks) =>
@@ -210,7 +211,7 @@ export function useScratchApp() {
       condition: hydrateSavedCondition(item),
       children: Array.isArray(item.children)
         ? item.children.map((child) => hydrateSavedBlock(child)).filter(Boolean)
-        : ["repeat", "if"].includes(item.type)
+        : ["repeat", "if", "waitUntil"].includes(item.type)
           ? []
           : undefined,
     };
@@ -218,7 +219,7 @@ export function useScratchApp() {
 
   function hydrateSavedCondition(item) {
     if (!item.condition) {
-      return item.type === "if"
+      return ["if", "waitUntil"].includes(item.type)
         ? defaultConditionBlock()
         : null;
     }
@@ -244,11 +245,14 @@ export function useScratchApp() {
     if (block.type === "wait") {
       await wait(Number(firstValue || 1));
     }
+    if (block.type === "keyPressed") {
+      return isKeyPressed(firstValue);
+    }
     if (block.type === "repeat") {
       setStatus(`Repeat ${firstValue || 2} times`);
     }
     if (block.type === "if") {
-      setStatus(evaluateCondition(block.condition) ? "If condition is true" : "If condition is false");
+      setStatus(evaluateCondition(block.condition, isKeyPressed) ? "If condition is true" : "If condition is false");
     }
     if (block.type === "askAI") {
       setStatus("Asking AI\u2026");
@@ -261,6 +265,22 @@ export function useScratchApp() {
       await connectArduino(setSerialOutput);
       setArduinoConnected(true);
       setStatus("Arduino connected");
+      return currentPosition;
+    }
+
+    if (block.type === "waitUntil") {
+      setStatus("Waiting for condition");
+      while (runningRef.current && !evaluateCondition(block.condition, isKeyPressed)) {
+        await wait(0.1);
+      }
+
+      if (runningRef.current) {
+        setStatus("Condition is true");
+        if (Array.isArray(block.children) && block.children.length > 0) {
+          currentPosition = await executeBlockList(block.children, currentPosition);
+        }
+      }
+
       return currentPosition;
     }
 
@@ -282,14 +302,14 @@ export function useScratchApp() {
       const targetPhrase = block.inputs?.[0] ?? "hello";
       setStatus(`Listening for "${targetPhrase}"...`);
       setVoiceListening(true);
-      
+
       const heard = await waitForPhrase(targetPhrase, 30000); // 30 second timeout
-      
+
       setVoiceListening(false);
-      
+
       if (heard) {
         setStatus(`Heard "${targetPhrase}"!`);
-        
+
         // Execute child blocks if phrase was heard
         const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : [];
         if (childBlocks.length > 0) {
@@ -298,7 +318,7 @@ export function useScratchApp() {
       } else {
         setStatus(`Timeout: didn't hear "${targetPhrase}"`);
       }
-      
+
       return currentPosition;
     }
 
@@ -381,7 +401,7 @@ export function useScratchApp() {
         const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
         const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
 
-        if (evaluateCondition(block.condition)) {
+        if (evaluateCondition(block.condition, isKeyPressed)) {
           if (childBlocks.length > 0) {
             const body = Array.isArray(block.children) && block.children.length > 0
               ? block.children

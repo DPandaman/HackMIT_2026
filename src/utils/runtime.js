@@ -7,6 +7,28 @@ let recognition = null;
 let isListening = false;
 let phraseCallbacks = [];
 
+const keysPressed = new Set();
+
+function normalizeKey(key) {
+  const rawKey = String(key ?? "").toLowerCase();
+  if (rawKey === " ") return " ";
+
+  const normalized = rawKey.trim();
+  return normalized === "space" ? " " : normalized;
+}
+
+window.addEventListener("keydown", (event) => {
+  keysPressed.add(normalizeKey(event.key));
+});
+
+window.addEventListener("keyup", (event) => {
+  keysPressed.delete(normalizeKey(event.key));
+});
+
+export function isKeyPressed(key) {
+  return keysPressed.has(normalizeKey(key));
+}
+
 export function moveSprite(currentPosition, distance) {
   return {
     ...currentPosition,
@@ -84,7 +106,7 @@ export async function connectArduino(setSerialOutput) {
     setSerialOutput?.((current) => [...current, "Connected to Arduino"]);
     startSerialReader(port, setSerialOutput);
   } catch (error) {
-    await port.close().catch(() => {});
+    await port.close().catch(() => { });
     throw error;
   }
 }

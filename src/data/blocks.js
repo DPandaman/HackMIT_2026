@@ -13,6 +13,7 @@ export const blockDefinitions = {
     { type: "wait", template: ["wait ", { value: "1", type: "number", min: "0", step: "0.1" }, " seconds"] },
     { type: "repeat", template: ["repeat ", { value: "2", type: "number", min: "1" }, " times"] },
     { type: "if", template: ["if ", { socket: "condition" }, " then"] },
+    { type: "waitUntil", template: ["wait until ", { socket: "condition" }] },
   ],
 
   condition: [
@@ -31,6 +32,15 @@ export const blockDefinitions = {
         { value: "1", type: "number", min: "0", step: "0.1" },
         " < ",
         { value: "2", type: "number", min: "0", step: "0.1" },
+      ],
+    },
+
+    {
+      type: "keyPressed",
+      template: [
+        "key ",
+        { value: "space", type: "text" },
+        " pressed?",
       ],
     },
 

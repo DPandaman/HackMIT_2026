@@ -69,7 +69,7 @@ export function defaultConditionBlock() {
   return createCondition("greaterThan");
 }
 
-export function evaluateCondition(condition) {
+export function evaluateCondition(condition, isKeyPressed) {
   if (!condition) return false;
 
   if (condition.type === "greaterThan") {
@@ -86,8 +86,12 @@ export function evaluateCondition(condition) {
     );
   }
 
+  if (condition.type === "keyPressed") {
+    return isKeyPressed(condition.inputs[0]);
+  }
+
   if (condition.type === "not") {
-    return !evaluateCondition(condition.condition);
+    return !evaluateCondition(condition.condition, isKeyPressed);
   }
 
   return false;

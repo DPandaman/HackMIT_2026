@@ -11,6 +11,7 @@ export function Block({
   onInputChange,
   onConditionDrop,
   onConditionInputChange,
+  conditionOwnerId = block?.id,
 }) {
   const definition = findDefinition(block.category, block.type);
   let inputIndex = 0;
@@ -47,7 +48,9 @@ export function Block({
           event.preventDefault();
           event.stopPropagation();
           const item = blockFromDrop(event);
-          if (item?.category === "condition") onConditionDrop(block.id, item.type);
+          if (item?.category === "condition") {
+            onConditionDrop(conditionOwnerId, item.type, block.id === conditionOwnerId ? null : block.id);
+          }
         }}
         style={{
           alignItems: "center",
@@ -67,6 +70,9 @@ export function Block({
             onInputChange={(conditionId, conditionInputIndex, value) =>
               onConditionInputChange(block.id, conditionId, conditionInputIndex, value)
             }
+            onConditionDrop={onConditionDrop}
+            onConditionInputChange={onConditionInputChange}
+            conditionOwnerId={block.id}
           />
         ) : (
           <span style={{ color: "white", fontSize: ".8rem", opacity: 0.78 }}>drop condition</span>
@@ -79,10 +85,28 @@ export function Block({
     event.preventDefault();
     event.stopPropagation();
     const item = blockFromDrop(event);
-    if (item) onAdd(item.type, item.category, block.id);
+    if (!item) return;
+
+    if (item.category === "condition" && ["if", "waitUntil"].includes(block.type)) {
+      onConditionDrop(block.id, item.type);
+      return;
+    }
+
+    onAdd(item.type, item.category, block.id);
   }
 
-  const canWrapChildren = !paletteBlock && ["repeat", "if", "whenHear"].includes(block.type);
+  function handleBlockDrop(event) {
+    if (paletteBlock || !["if", "waitUntil"].includes(block.type)) return;
+
+    const item = blockFromDrop(event);
+    if (item?.category !== "condition") return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    onConditionDrop(block.id, item.type);
+  }
+
+  const canWrapChildren = !paletteBlock && ["repeat", "if", "waitUntil", "whenHear"].includes(block.type);
 
   return (
     <div
@@ -92,6 +116,10 @@ export function Block({
       onClick={paletteBlock ? () => onAdd(block.type, block.category) : undefined}
       onDoubleClick={!paletteBlock && onRemove ? () => onRemove(block.id) : undefined}
       onDragStart={handleDragStart}
+      onDragOver={(event) => {
+        if (!paletteBlock && ["if", "waitUntil"].includes(block.type)) event.preventDefault();
+      }}
+      onDrop={handleBlockDrop}
     >
       {definition.template.map((part, index) => {
         if (typeof part === "string") return <React.Fragment key={index}>{part}</React.Fragment>;
