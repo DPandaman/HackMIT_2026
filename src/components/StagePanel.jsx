@@ -16,7 +16,7 @@ export function StagePanel({ position, resetSprite, setSpriteName, speech, sprit
             transform: `translate(-50%, -50%) rotate(${position.rotation}deg)`,
           }}
         >
-          ➡️
+          <img src={"..\assests\cat.png"} alt={"➡️"} />
         </div>
         <div className="speech" hidden={!speech}>{speech}</div>
       </div>
