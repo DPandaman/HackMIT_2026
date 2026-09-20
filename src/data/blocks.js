@@ -46,11 +46,15 @@ export const blockDefinitions = {
   events: [
     { type: "flag", template: ["when 🚩 clicked"] },
   ],
-
   hardware: [
     {
       type: "arduinoConnect",
       template: ["connect Arduino"],
+    },
+
+    {
+      type: "arduinoDisconnect",
+      template: ["disconnect Arduino"],
     },
 
     {
@@ -63,9 +67,33 @@ export const blockDefinitions = {
     },
 
     {
-      type: "arduinoDisconnect",
-      template: ["disconnect Arduino"],
-    }
+      type: "arduinoSetPin",
+      template: [
+        "set pin ",
+        { value: "13", type: "number", min: "0" },
+        " to ",
+        { value: "HIGH", type: "text" },
+      ],
+    },
+
+    {
+      type: "arduinoTogglePin",
+      template: [
+        "toggle pin ",
+        { value: "13", type: "number", min: "0" },
+      ],
+    },
+
+    {
+      type: "arduinoBlink",
+      template: [
+        "blink pin ",
+        { value: "13", type: "number", min: "0" },
+        " for ",
+        { value: "500", type: "number", min: "0" },
+        " ms",
+      ],
+    },
   ],
   ai: [
     {

@@ -302,6 +302,35 @@ export function useScratchApp() {
       return currentPosition;
     }
 
+    if (block.type === "arduinoSetPin") {
+      const pin = block.inputs?.[0] ?? 13;
+      const state = block.inputs?.[1] ?? "HIGH";
+
+      await sendArduino(`PIN ${pin} ${String(state).toUpperCase()}`);
+
+      setStatus(`Pin ${pin} set to ${String(state).toUpperCase()}`);
+      return currentPosition;
+    }
+
+    if (block.type === "arduinoTogglePin") {
+      const pin = block.inputs?.[0] ?? 13;
+
+      await sendArduino(`TOGGLE ${pin}`);
+
+      setStatus(`Toggled pin ${pin}`);
+      return currentPosition;
+    }
+
+    if (block.type === "arduinoBlink") {
+      const pin = block.inputs?.[0] ?? 13;
+      const duration = block.inputs?.[1] ?? 500;
+
+      await sendArduino(`BLINK ${pin} ${duration}`);
+
+      setStatus(`Blinking pin ${pin} for ${duration} ms`);
+      return currentPosition;
+    }
+
     return currentPosition;
   }
 
