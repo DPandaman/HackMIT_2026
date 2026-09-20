@@ -65,6 +65,12 @@ export const blockDefinitions = {
     {
       type: "arduinoDisconnect",
       template: ["disconnect Arduino"],
+    }
+  ],
+  ai: [
+    {
+      type: "askAI",
+      template: ["ask AI ", { value: "What should the sprite say?", type: "text" }, " and say the answer"],
     },
   ],
 };
@@ -76,6 +82,7 @@ export const categoryLabels = {
   events: "Events",
   condition: "Condition",
   hardware: "Hardware",
+  ai: "AI",
 };
 
 export function findDefinition(category, type) {

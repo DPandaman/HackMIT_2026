@@ -1,7 +1,15 @@
 import { useMemo, useRef, useState } from "react";
 import { blockDefinitions, defaultInputs, findDefinition } from "../data/blocks";
 import { blockFromDrop, defaultConditionBlock, evaluateCondition, makeId, createCondition } from "../utils/blockHelpers";
-import { moveSprite, wait, connectArduino, disconnectArduino, sendArduino, isArduinoConnected, } from "../utils/runtime";
+import {
+  askAI,
+  moveSprite,
+  wait,
+  connectArduino,
+  disconnectArduino,
+  sendArduino,
+  isArduinoConnected,
+} from "../utils/runtime";
 
 const initialPosition = { x: 50, y: 52, rotation: 0 };
 
@@ -226,6 +234,12 @@ export function useScratchApp() {
     }
     if (block.type === "if") {
       setStatus(evaluateCondition(block.condition) ? "If condition is true" : "If condition is false");
+    }
+    if (block.type === "askAI") {
+      setStatus("Asking AI\u2026");
+      const answer = await askAI(firstValue);
+      setSpeech(answer);
+      setStatus("Running");
     }
 
     if (block.type === "arduinoConnect") {

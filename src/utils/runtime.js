@@ -29,6 +29,32 @@ export function wait(seconds) {
   );
 }
 
+const AI_ENDPOINT = "http://localhost:5000/api/ask";
+
+export async function askAI(prompt) {
+  const trimmedPrompt = (prompt || "").trim();
+  if (!trimmedPrompt) return "(no prompt given)";
+
+  try {
+    const response = await fetch(AI_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: trimmedPrompt }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody.error || `AI request failed (${response.status})`);
+    }
+
+    const data = await response.json();
+    return data.answer || "(AI returned nothing)";
+  } catch (error) {
+    console.error("askAI error:", error);
+    return "(AI is unavailable right now)";
+  }
+}
+
 export async function connectArduino() {
   if (!("serial" in navigator)) {
     throw new Error(
@@ -36,46 +62,35 @@ export async function connectArduino() {
     );
   }
 
-  // Already connected
   if (arduinoPort) {
     return;
   }
 
   arduinoPort = await navigator.serial.requestPort();
+  await arduinoPort.open({ baudRate: 115200 });
 
-  await arduinoPort.open({
-    baudRate: 115200,
-  });
+  arduinoWriter = arduinoPort.writable.getWriter();
 }
 
 export async function disconnectArduino() {
-  if (!arduinoPort) {
-    return;
-  }
-
   if (arduinoWriter) {
     arduinoWriter.releaseLock();
     arduinoWriter = null;
   }
 
-  await arduinoPort.close();
-  arduinoPort = null;
+  if (arduinoPort) {
+    await arduinoPort.close();
+    arduinoPort = null;
+  }
 }
 
 export async function sendArduino(message) {
-  if (!arduinoPort || !arduinoPort.writable) {
+  if (!arduinoWriter) {
     throw new Error("Arduino is not connected.");
   }
 
-  if (!arduinoWriter) {
-    arduinoWriter = arduinoPort.writable.getWriter();
-  }
-
-  const encoder = new TextEncoder();
-
-  await arduinoWriter.write(
-    encoder.encode(`${String(message)}\n`)
-  );
+  const data = new TextEncoder().encode(`${message}\n`);
+  await arduinoWriter.write(data);
 }
 
 export function isArduinoConnected() {
