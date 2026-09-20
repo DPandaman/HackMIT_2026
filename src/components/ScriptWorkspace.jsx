@@ -12,6 +12,9 @@ export function ScriptWorkspace({
   onDragLeave,
   onDragOver,
   onDrop,
+  onValueDrop,
+  onAIPromptChange,
+  onClearAIValue,
 }) {
   return (
     <div
@@ -37,6 +40,9 @@ export function ScriptWorkspace({
             onInputChange={onBlockInputChange}
             onConditionDrop={onConditionDrop}
             onConditionInputChange={onConditionInputChange}
+            onValueDrop={onValueDrop}
+            onAIPromptChange={onAIPromptChange}
+            onClearAIValue={onClearAIValue}
           />
         ))
       )}

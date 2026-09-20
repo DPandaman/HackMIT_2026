@@ -1,6 +1,6 @@
 import React from "react";
 import { findDefinition } from "../data/blocks";
-import { blockFromDrop } from "../utils/blockHelpers";
+import { blockFromDrop, isAIValue } from "../utils/blockHelpers";
 
 export function Block({
   block,
@@ -11,6 +11,12 @@ export function Block({
   onInputChange,
   onConditionDrop,
   onConditionInputChange,
+  onValueDrop,
+  onAIPromptChange,
+  onClearAIValue,
+  onConditionValueDrop,
+  onConditionAIPromptChange,
+  onConditionClearAIValue,
 }) {
   const definition = findDefinition(block.category, block.type);
   let inputIndex = 0;
@@ -23,6 +29,27 @@ export function Block({
 
   function handleDragStart(event) {
     event.dataTransfer.setData("text/plain", JSON.stringify({ type: block.type, category: block.category }));
+  }
+
+  // Grows a textarea to fit its content instead of scrolling internally --
+  // used for every AI prompt box so long prompts wrap and push the box
+  // taller rather than overflowing or scrolling out of view. Works as a
+  // plain ref callback (no hooks needed) since it just measures and sets
+  // the DOM node's own height; React re-invokes it on every render.
+  function autoResizeTextarea(el) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }
+
+  // A textarea with no explicit width falls back to the browser's default
+  // `cols`-based sizing, which doesn't track content -- so the box was
+  // rendering at one fixed width regardless of what was typed. This grows
+  // the box up to a cap, then leaves wrapping (from the CSS) to take over
+  // for anything longer, rather than growing sideways forever.
+  function textareaWidthStyle(value, maxCh = 30) {
+    const length = String(value ?? "").length;
+    return { width: `${Math.min(maxCh, Math.max(8, length + 2))}ch` };
   }
 
   function renderConditionSocket(index) {
@@ -67,6 +94,15 @@ export function Block({
             onInputChange={(conditionId, conditionInputIndex, value) =>
               onConditionInputChange(block.id, conditionId, conditionInputIndex, value)
             }
+            onValueDrop={(conditionId, conditionInputIndex, kind) =>
+              onConditionValueDrop(block.id, conditionId, conditionInputIndex, kind)
+            }
+            onAIPromptChange={(conditionId, conditionInputIndex, prompt) =>
+              onConditionAIPromptChange(block.id, conditionId, conditionInputIndex, prompt)
+            }
+            onClearAIValue={(conditionId, conditionInputIndex, defaultValue) =>
+              onConditionClearAIValue(block.id, conditionId, conditionInputIndex, defaultValue)
+            }
           />
         ) : (
           <span style={{ color: "white", fontSize: ".8rem", opacity: 0.78 }}>drop condition</span>
@@ -75,11 +111,72 @@ export function Block({
     );
   }
 
+  // Renders an input slot that has had the AI block dropped into it -- e.g.
+  // "move [AI: how far should the cat go?] steps". `part` is the slot's own
+  // template definition (so we know whether it wants a number or text back).
+  function renderAIValueSocket(aiValue, index, part) {
+    if (paletteBlock) {
+      return (
+        <span key={index} style={{ opacity: 0.78 }}>
+          &lt;AI&gt;
+        </span>
+      );
+    }
+
+    return (
+      <span
+        key={index}
+        className="ai-value-slot"
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const item = blockFromDrop(event);
+          if (item?.category === "ai") onValueDrop(block.id, index, part.type);
+        }}
+      >
+        <span className="ai-value-badge">AI</span>
+        <textarea
+          rows={1}
+          className="ai-value-prompt"
+          value={aiValue.prompt}
+          style={textareaWidthStyle(aiValue.prompt, 24)}
+          ref={autoResizeTextarea}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => onAIPromptChange(block.id, index, event.target.value)}
+          onInput={(event) => autoResizeTextarea(event.target)}
+        />
+        {aiValue.lastAnswer != null && (
+          <span className="ai-value-answer" title="What the AI chose last run">
+            &rarr; {aiValue.lastAnswer}
+          </span>
+        )}
+        <button
+          type="button"
+          className="ai-value-clear"
+          title="Use a typed value instead"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onClearAIValue(block.id, index, part.value);
+          }}
+        >
+          ×
+        </button>
+      </span>
+    );
+  }
+
   function handleBodyDrop(event) {
     event.preventDefault();
     event.stopPropagation();
     const item = blockFromDrop(event);
-    if (item) onAdd(item.type, item.category, block.id);
+    if (item && item.category !== "ai") onAdd(item.type, item.category, block.id);
   }
 
   const canWrapChildren = !paletteBlock && ["repeat", "if", "whenHear"].includes(block.type);
@@ -99,6 +196,46 @@ export function Block({
 
         const currentIndex = inputIndex;
         inputIndex += 1;
+        const currentValue = block.inputs[currentIndex] ?? part.value;
+
+        if (isAIValue(currentValue)) {
+          return renderAIValueSocket(currentValue, currentIndex, part);
+        }
+
+        if (part.type === "text") {
+          return (
+            <textarea
+              key={index}
+              rows={1}
+              className="block-textarea"
+              value={currentValue}
+              readOnly={paletteBlock}
+              style={textareaWidthStyle(currentValue, 30)}
+              ref={autoResizeTextarea}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => onInputChange(block.id, currentIndex, event.target.value)}
+              onInput={(event) => autoResizeTextarea(event.target)}
+              onDragOver={
+                !paletteBlock
+                  ? (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }
+                  : undefined
+              }
+              onDrop={
+                !paletteBlock
+                  ? (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const item = blockFromDrop(event);
+                      if (item?.category === "ai") onValueDrop(block.id, currentIndex, part.type);
+                    }
+                  : undefined
+              }
+            />
+          );
+        }
 
         return (
           <input
@@ -106,14 +243,38 @@ export function Block({
             type={part.type}
             min={part.min}
             step={part.step}
-            value={block.inputs[currentIndex] ?? part.value}
+            value={currentValue}
             readOnly={paletteBlock}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => onInputChange(block.id, currentIndex, event.target.value)}
-            style={part.type === 'text' ? { width: '100px', textAlign: 'left' } : {}}
+            onDragOver={
+              !paletteBlock
+                ? (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
+                : undefined
+            }
+            onDrop={
+              !paletteBlock
+                ? (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const item = blockFromDrop(event);
+                    if (item?.category === "ai") onValueDrop(block.id, currentIndex, part.type);
+                  }
+                : undefined
+            }
           />
         );
       })}
+
+      {/* Shows what an "AI:" condition decided last run, e.g. "AI: ... -> true" */}
+      {!paletteBlock && block.lastAnswer != null && (
+        <span className="ai-value-answer" title="What the AI decided last run">
+          &rarr; {block.lastAnswer}
+        </span>
+      )}
 
       {canWrapChildren && (
         <div
@@ -135,6 +296,12 @@ export function Block({
                 onInputChange={onInputChange}
                 onConditionDrop={onConditionDrop}
                 onConditionInputChange={onConditionInputChange}
+                onValueDrop={onValueDrop}
+                onAIPromptChange={onAIPromptChange}
+                onClearAIValue={onClearAIValue}
+                onConditionValueDrop={onConditionValueDrop}
+                onConditionAIPromptChange={onConditionAIPromptChange}
+                onConditionClearAIValue={onConditionClearAIValue}
               />
             ))
           ) : (

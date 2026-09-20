@@ -50,6 +50,12 @@ export function App() {
             onDragLeave={() => scratch.setDragOver(false)}
             onDragOver={() => scratch.setDragOver(true)}
             onDrop={scratch.handleDrop}
+            onValueDrop={scratch.dropAIValue}
+            onAIPromptChange={scratch.updateAIPrompt}
+            onClearAIValue={scratch.clearAIValue}
+            onConditionValueDrop={scratch.dropConditionAIValue}
+            onConditionAIPromptChange={scratch.updateConditionAIPrompt}
+            onConditionClearAIValue={scratch.clearConditionAIValue}
           />
         </section>
 
