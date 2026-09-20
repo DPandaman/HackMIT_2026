@@ -64,6 +64,20 @@ export function App() {
         />
       </main>
 
+      <section className="serial-console" aria-label="Arduino serial monitor">
+        <div className="serial-header">
+          <h2>Arduino Serial</h2>
+          <button className="secondary" onClick={scratch.clearSerial}>Clear</button>
+        </div>
+        <div className="serial-output" role="log" aria-live="polite">
+          {scratch.serialOutput.length === 0
+            ? <span className="serial-empty">No serial output yet.</span>
+            : scratch.serialOutput.map((line, index) => (
+              <div key={`${index}-${line}`}>{line}</div>
+            ))}
+        </div>
+      </section>
+
       <footer>Everything runs locally in your browser. Projects are saved in this browser.</footer>
     </>
   );

@@ -1,5 +1,7 @@
 let arduinoPort = null;
 let arduinoWriter = null;
+let arduinoReader = null;
+let arduinoReadBuffer = "";
 
 let recognition = null;
 let isListening = false;
@@ -13,7 +15,7 @@ export function moveSprite(currentPosition, distance) {
       Math.min(
         96,
         currentPosition.x +
-          (Math.cos((currentPosition.rotation * Math.PI) / 180) * distance) / 4
+        (Math.cos((currentPosition.rotation * Math.PI) / 180) * distance) / 4
       )
     ),
     y: Math.max(
@@ -21,7 +23,7 @@ export function moveSprite(currentPosition, distance) {
       Math.min(
         92,
         currentPosition.y +
-          (Math.sin((currentPosition.rotation * Math.PI) / 180) * distance) / 4
+        (Math.sin((currentPosition.rotation * Math.PI) / 180) * distance) / 4
       )
     ),
   };
@@ -33,7 +35,7 @@ export function wait(seconds) {
   );
 }
 
-const AI_ENDPOINT = "http://localhost:5000/api/ask";
+const AI_ENDPOINT = "/api/ask";
 
 export async function askAI(prompt) {
   const trimmedPrompt = (prompt || "").trim();
@@ -59,7 +61,7 @@ export async function askAI(prompt) {
   }
 }
 
-export async function connectArduino() {
+export async function connectArduino(setSerialOutput) {
   if (!("serial" in navigator)) {
     throw new Error(
       "Web Serial is not supported. Please use Chrome or Edge."
@@ -70,31 +72,80 @@ export async function connectArduino() {
     return;
   }
 
-  arduinoPort = await navigator.serial.requestPort();
-  await arduinoPort.open({ baudRate: 115200 });
+  const port = await navigator.serial.requestPort();
+  try {
+    await port.open({ baudRate: 115200 });
+    if (!port.writable) {
+      throw new Error("The selected serial device is not writable.");
+    }
 
-  arduinoWriter = arduinoPort.writable.getWriter();
+    arduinoPort = port;
+    arduinoWriter = port.writable.getWriter();
+    setSerialOutput?.((current) => [...current, "Connected to Arduino"]);
+    startSerialReader(port, setSerialOutput);
+  } catch (error) {
+    await port.close().catch(() => {});
+    throw error;
+  }
+}
+
+function startSerialReader(port, setSerialOutput) {
+  if (!port.readable || !setSerialOutput) return;
+
+  const reader = port.readable.getReader();
+  arduinoReader = reader;
+  void (async () => {
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        if (value) {
+          arduinoReadBuffer += new TextDecoder().decode(value);
+          const lines = arduinoReadBuffer.split(/\r?\n/);
+          arduinoReadBuffer = lines.pop() || "";
+          if (lines.length > 0) {
+            setSerialOutput((current) => [...current, ...lines]);
+          }
+        }
+      }
+    } catch (error) {
+      if (arduinoPort === port) console.error("Serial read error:", error);
+    } finally {
+      reader.releaseLock();
+      if (arduinoReader === reader) arduinoReader = null;
+    }
+  })();
 }
 
 export async function disconnectArduino() {
+  const port = arduinoPort;
+  arduinoPort = null;
+
+  if (arduinoReader) {
+    await arduinoReader.cancel();
+    arduinoReader = null;
+  }
+
   if (arduinoWriter) {
     arduinoWriter.releaseLock();
     arduinoWriter = null;
   }
 
-  if (arduinoPort) {
-    await arduinoPort.close();
-    arduinoPort = null;
+  if (port) {
+    await port.close();
   }
+  arduinoReadBuffer = "";
 }
 
-export async function sendArduino(message) {
-  if (!arduinoWriter) {
+export async function sendArduino(message, setSerialOutput) {
+  if (!arduinoPort || !arduinoWriter) {
     throw new Error("Arduino is not connected.");
   }
 
   const data = new TextEncoder().encode(`${message}\n`);
   await arduinoWriter.write(data);
+  setSerialOutput?.((current) => [...current, `> ${String(message)}`]);
 }
 
 export function isArduinoConnected() {
@@ -123,7 +174,7 @@ export function startListening() {
   recognition.onresult = (event) => {
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const transcript = event.results[i][0].transcript.trim().toLowerCase();
-      
+
       if (event.results[i].isFinal) {
         // Notify all waiting callbacks
         phraseCallbacks.forEach(callback => callback(transcript));

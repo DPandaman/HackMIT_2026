@@ -30,6 +30,7 @@ export function useScratchApp() {
   const [status, setStatus] = useState("Ready");
   const [activeBlockId, setActiveBlockId] = useState(null);
   const [arduinoConnected, setArduinoConnected] = useState(isArduinoConnected());
+  const [serialOutput, setSerialOutput] = useState([]);
   const [voiceListening, setVoiceListening] = useState(false);
   const runningRef = useRef(false);
 
@@ -257,7 +258,7 @@ export function useScratchApp() {
     }
 
     if (block.type === "arduinoConnect") {
-      await connectArduino();
+      await connectArduino(setSerialOutput);
       setArduinoConnected(true);
       setStatus("Arduino connected");
       return currentPosition;
@@ -265,7 +266,7 @@ export function useScratchApp() {
 
     if (block.type === "arduinoSend") {
       const message = block.inputs?.[0] ?? "";
-      await sendArduino(message);
+      await sendArduino(message, setSerialOutput);
       setStatus(`Sent to Arduino: ${message}`);
       return currentPosition;
     }
@@ -592,11 +593,13 @@ export function useScratchApp() {
     updateConditionInput,
 
     arduinoConnected,
+    serialOutput,
+    clearSerial: () => setSerialOutput([]),
     voiceListening,
 
     connectArduino: async () => {
       try {
-        await connectArduino();
+        await connectArduino(setSerialOutput);
         setArduinoConnected(true);
         setStatus("Arduino connected");
       } catch (error) {
