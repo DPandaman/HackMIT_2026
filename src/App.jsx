@@ -18,6 +18,7 @@ export function App() {
         runScript={scratch.runScript}
         stopScript={scratch.stopScript}
         setProjectName={scratch.setProjectName}
+        voiceListening={scratch.voiceListening}
       />
 
       <main className="workspace">

@@ -115,6 +115,17 @@ input {
   margin-left: auto;
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+  font-size: 0.85rem;
+  color: #ff6680;
+  font-weight: 600;
 }
 
 /* Buttons */
@@ -229,6 +240,10 @@ h2 {
   color: #624d00;
 }
 
+.category[data-category="voice"] {
+  background: #ff6680;
+}
+
 /* Palette & Scripts */
 .palette,
 .script {
@@ -282,6 +297,11 @@ h2 {
   color: #263238;
 }
 
+.block input[type="text"] {
+  width: 80px;
+  text-align: left;
+}
+
 .block.motion {
   background: var(--blue);
 }
@@ -301,6 +321,10 @@ h2 {
 
 .block.hardware {
   background: var(--teal);
+}
+
+.block.voice {
+  background: #ff6680;
 }
 
 .block.condition {
@@ -419,6 +443,33 @@ footer {
   font-size: 0.75rem;
 }
 
+/* Voice Listening Indicator */
+.voice-indicator {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ccc;
+  margin-right: 8px;
+  animation: none;
+}
+
+.voice-indicator.listening {
+  background: #ff6680;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.2);
+  }
+}
+
 /* Responsive */
 @media (max-width: 850px) {
   .workspace {
@@ -436,6 +487,10 @@ footer {
   }
 
   .project-name {
+    display: none;
+  }
+
+  .voice-status {
     display: none;
   }
 }

@@ -9,6 +9,10 @@ import {
   disconnectArduino,
   sendArduino,
   isArduinoConnected,
+  startListening,
+  stopListening,
+  waitForPhrase,
+  isSpeechRecognitionSupported,
 } from "../utils/runtime";
 
 const initialPosition = { x: 50, y: 52, rotation: 0 };
@@ -26,6 +30,7 @@ export function useScratchApp() {
   const [status, setStatus] = useState("Ready");
   const [activeBlockId, setActiveBlockId] = useState(null);
   const [arduinoConnected, setArduinoConnected] = useState(isArduinoConnected());
+  const [voiceListening, setVoiceListening] = useState(false);
   const runningRef = useRef(false);
 
   const paletteBlocks = useMemo(
@@ -38,6 +43,15 @@ export function useScratchApp() {
       })),
     [category],
   );
+
+  function getControlBodyEnd(startIndex) {
+    for (let i = startIndex; i < blocks.length; i++) {
+      if (blocks[i].category === "control" || blocks[i].category === "voice") {
+        return i;
+      }
+    }
+    return blocks.length;
+  }
 
   function appendBlockToTree(blocks, parentId, newBlock) {
     if (!parentId) return [...blocks, newBlock];
@@ -98,7 +112,7 @@ export function useScratchApp() {
       category: blockCategory,
       inputs: defaultInputs(definition),
       condition: type === "if" ? defaultConditionBlock() : null,
-      children: ["repeat", "if"].includes(type) ? [] : undefined,
+      children: ["repeat", "if", "whenHear"].includes(type) ? [] : undefined,
     };
 
     setBlocks((currentBlocks) =>
@@ -263,6 +277,30 @@ export function useScratchApp() {
       return currentPosition;
     }
 
+    if (block.type === "whenHear") {
+      const targetPhrase = block.inputs?.[0] ?? "hello";
+      setStatus(`Listening for "${targetPhrase}"...`);
+      setVoiceListening(true);
+      
+      const heard = await waitForPhrase(targetPhrase, 30000); // 30 second timeout
+      
+      setVoiceListening(false);
+      
+      if (heard) {
+        setStatus(`Heard "${targetPhrase}"!`);
+        
+        // Execute child blocks if phrase was heard
+        const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : [];
+        if (childBlocks.length > 0) {
+          currentPosition = await executeBlockList(childBlocks, currentPosition);
+        }
+      } else {
+        setStatus(`Timeout: didn't hear "${targetPhrase}"`);
+      }
+      
+      return currentPosition;
+    }
+
     return currentPosition;
   }
 
@@ -299,6 +337,18 @@ export function useScratchApp() {
     setStatus("Running");
     setActiveBlockId(null);
     resetSprite();
+
+    // Start voice listening if there are voice blocks
+    const hasVoiceBlocks = blocks.some(block => block.category === "voice");
+    if (hasVoiceBlocks && isSpeechRecognitionSupported()) {
+      try {
+        startListening();
+        setVoiceListening(true);
+      } catch (error) {
+        console.error("Failed to start voice recognition:", error);
+        setStatus("Voice recognition not available");
+      }
+    }
 
     let currentPosition = initialPosition;
     for (let index = 0; index < blocks.length; index += 1) {
@@ -347,12 +397,16 @@ export function useScratchApp() {
 
     runningRef.current = false;
     setActiveBlockId(null);
+    setVoiceListening(false);
+    stopListening();
     setStatus("Ready");
   }
 
   function stopScript() {
     runningRef.current = false;
     setActiveBlockId(null);
+    setVoiceListening(false);
+    stopListening();
     setStatus("Stopped");
   }
 
@@ -538,6 +592,7 @@ export function useScratchApp() {
     updateConditionInput,
 
     arduinoConnected,
+    voiceListening,
 
     connectArduino: async () => {
       try {

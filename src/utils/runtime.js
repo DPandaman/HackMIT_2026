@@ -1,6 +1,10 @@
 let arduinoPort = null;
 let arduinoWriter = null;
 
+let recognition = null;
+let isListening = false;
+let phraseCallbacks = [];
+
 export function moveSprite(currentPosition, distance) {
   return {
     ...currentPosition,
@@ -95,4 +99,92 @@ export async function sendArduino(message) {
 
 export function isArduinoConnected() {
   return arduinoPort !== null;
+}
+
+export function isSpeechRecognitionSupported() {
+  return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+}
+
+export function startListening() {
+  if (!isSpeechRecognitionSupported()) {
+    throw new Error("Speech recognition is not supported. Please use Chrome or Edge.");
+  }
+
+  if (isListening) {
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onresult = (event) => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript.trim().toLowerCase();
+      
+      if (event.results[i].isFinal) {
+        // Notify all waiting callbacks
+        phraseCallbacks.forEach(callback => callback(transcript));
+        phraseCallbacks = [];
+      }
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error('Speech recognition error:', event.error);
+    // Notify all callbacks of error
+    phraseCallbacks.forEach(callback => callback(null));
+    phraseCallbacks = [];
+  };
+
+  recognition.onend = () => {
+    if (isListening) {
+      recognition.start();
+    }
+  };
+
+  recognition.start();
+  isListening = true;
+}
+
+export function stopListening() {
+  if (recognition) {
+    isListening = false;
+    recognition.stop();
+    recognition = null;
+  }
+}
+
+export async function waitForPhrase(targetPhrase, timeout = 10000) {
+  if (!isListening) {
+    startListening();
+  }
+
+  const normalizedTarget = targetPhrase.toLowerCase().trim();
+  const startTime = Date.now();
+  let resolved = false;
+
+  return new Promise((resolve) => {
+    const checkInterval = setInterval(() => {
+      if (Date.now() - startTime > timeout) {
+        clearInterval(checkInterval);
+        if (!resolved) {
+          resolved = true;
+          resolve(false);
+        }
+      }
+    }, 100);
+
+    const onPhrase = (phrase) => {
+      if (!resolved && phrase && phrase.includes(normalizedTarget)) {
+        clearInterval(checkInterval);
+        resolved = true;
+        resolve(true);
+      }
+    };
+
+    phraseCallbacks.push(onPhrase);
+  });
 }

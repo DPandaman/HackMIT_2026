@@ -82,7 +82,7 @@ export function Block({
     if (item) onAdd(item.type, item.category, block.id);
   }
 
-  const canWrapChildren = !paletteBlock && ["repeat", "if"].includes(block.type);
+  const canWrapChildren = !paletteBlock && ["repeat", "if", "whenHear"].includes(block.type);
 
   return (
     <div
@@ -110,6 +110,7 @@ export function Block({
             readOnly={paletteBlock}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => onInputChange(block.id, currentIndex, event.target.value)}
+            style={part.type === 'text' ? { width: '100px', textAlign: 'left' } : {}}
           />
         );
       })}

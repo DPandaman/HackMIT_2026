@@ -73,6 +73,14 @@ export const blockDefinitions = {
       template: ["ask AI ", { value: "What should the sprite say?", type: "text" }, " and say the answer"],
     },
   ],
+
+  voice: [
+    {
+      type: "whenHear",
+      template: ["when I hear ", { value: "hello", type: "text" }],
+      isEvent: true,
+    },
+  ],
 };
 
 export const categoryLabels = {
@@ -83,6 +91,7 @@ export const categoryLabels = {
   condition: "Condition",
   hardware: "Hardware",
   ai: "AI",
+  voice: "Voice",
 };
 
 export function findDefinition(category, type) {
