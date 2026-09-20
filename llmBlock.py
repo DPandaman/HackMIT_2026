@@ -26,6 +26,8 @@ keep this running alongside `npm run dev` while you use the AI block.
 import os
 import random
 import re
+import base64
+from io import BytesIO
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -39,6 +41,7 @@ app = Flask(__name__)
 CORS(app)  # allow the Vite dev server (a different port) to call this
 
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+IMAGE_MODEL = "stabilityai/stable-diffusion-xl-base-1.0"
 MAX_TOKENS = 60
 MAX_ANSWER_CHARS = 120
 NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
@@ -130,6 +133,23 @@ def ask():
         fallback = "0" if kind == "number" else "(empty response)"
         return jsonify({"answer": answer or fallback})
     except Exception as exc:  # noqa: BLE001 - surface any provider/config error to the block
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/generate-image", methods=["POST"])
+def generate_image():
+    body = request.get_json(force=True, silent=True) or {}
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "prompt is required"}), 400
+
+    try:
+        image = get_client().text_to_image(prompt=prompt, model=IMAGE_MODEL)
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return jsonify({"image": f"data:image/png;base64,{encoded}"})
+    except Exception as exc:  # noqa: BLE001 - surface provider/config errors to the block
         return jsonify({"error": str(exc)}), 500
 
 

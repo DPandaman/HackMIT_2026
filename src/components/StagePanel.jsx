@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import cat from "../assets/cat.png";
 
 const SPEECH_H_GAP = 14;
 const SPEECH_V_OFFSET = 46;
@@ -28,7 +29,7 @@ function computeSpeechPosition({ stageEl, speechEl, position }) {
   return { left: `${left}px`, top: `${top}px`, transform: "none" };
 }
 
-export function StagePanel({ position, resetSprite, setSpriteName, speech, spriteHidden, spriteName, status }) {
+export function StagePanel({ position, resetSprite, setSpriteName, speech, spriteHidden, spriteName, spriteImage, status }) {
   const stageRef = useRef(null);
   const speechRef = useRef(null);
   const [speechStyle, setSpeechStyle] = useState(null);
@@ -66,7 +67,7 @@ export function StagePanel({ position, resetSprite, setSpriteName, speech, sprit
             transform: `translate(-50%, -50%) rotate(${position.rotation}deg)`,
           }}
         >
-          🐱
+          <img src={spriteImage || cat} width="70" height="70" alt={`${spriteName} sprite`}></img>
         </div>
         <div className="speech" ref={speechRef} hidden={!speech} style={speechStyle ?? undefined}>
           {speech}

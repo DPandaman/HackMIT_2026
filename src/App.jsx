@@ -65,6 +65,7 @@ export function App() {
           setSpriteName={scratch.setSpriteName}
           speech={scratch.speech}
           spriteHidden={scratch.spriteHidden}
+          spriteImage={scratch.spriteImage}
           spriteName={scratch.spriteName}
           status={scratch.status}
         />

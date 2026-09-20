@@ -3,6 +3,7 @@ import { blockDefinitions, defaultInputs, findDefinition } from "../data/blocks"
 import { blockFromDrop, defaultConditionBlock, makeId, createCondition, isAIValue, createAIValue } from "../utils/blockHelpers";
 import {
   askAI,
+  generateImage,
   moveSprite,
   wait,
   connectArduino,
@@ -23,6 +24,7 @@ export function useScratchApp() {
   const [category, setCategory] = useState("motion");
   const [projectName, setProjectName] = useState("My project");
   const [spriteName, setSpriteName] = useState("Cat");
+  const [spriteImage, setSpriteImage] = useState(null);
   const [blocks, setBlocks] = useState([]);
   const [dragOver, setDragOver] = useState(false);
   const [position, setPosition] = useState(initialPosition);
@@ -114,7 +116,7 @@ export function useScratchApp() {
       category: blockCategory,
       inputs: defaultInputs(definition),
       condition: ["if", "waitUntil"].includes(type) ? defaultConditionBlock() : null,
-      children: ["repeat", "if", "waitUntil", "whenHear"].includes(type) ? [] : undefined,
+      children: ["repeat", "forever", "if", "waitUntil", "whenHear"].includes(type) ? [] : undefined,
     };
 
     setBlocks((currentBlocks) =>
@@ -175,6 +177,7 @@ export function useScratchApp() {
     setPosition(initialPosition);
     setSpriteHidden(false);
     setSpeech("");
+    setSpriteImage(null);
   }
 
 
@@ -194,6 +197,7 @@ export function useScratchApp() {
     return {
       name: projectName.trim(),
       spriteName,
+      spriteImage,
       blocks: blocks.map((block) => serializeBlock(block)),
     };
   }
@@ -226,6 +230,7 @@ export function useScratchApp() {
     setSpriteName(project.spriteName || "Cat");
     setBlocks((project.blocks || []).map(hydrateSavedBlock).filter(Boolean));
     resetSprite();
+    setSpriteImage(project.spriteImage || null);
   }
 
   function hydrateSavedBlock(item) {
@@ -241,7 +246,7 @@ export function useScratchApp() {
       condition: hydrateSavedCondition(item),
       children: Array.isArray(item.children)
         ? item.children.map((child) => hydrateSavedBlock(child)).filter(Boolean)
-        : ["repeat", "if", "waitUntil"].includes(item.type)
+        : ["repeat", "forever", "if", "waitUntil"].includes(item.type)
           ? []
           : undefined,
     };
@@ -286,6 +291,14 @@ export function useScratchApp() {
     if (block.type === "move") {
       return { position: moveSprite(currentPosition, Number(firstValue || 10)), value: firstValue };
     }
+
+    if (block.type === "generateImage") {
+      setStatus("Generating image...");
+      const image = await generateImage(firstValue);
+      setSpriteImage(image);
+      setStatus("Image generated");
+    }
+
     if (block.type === "turn") {
       return {
         position: { ...currentPosition, rotation: currentPosition.rotation + Number(firstValue || 15) },
@@ -356,6 +369,29 @@ export function useScratchApp() {
       return { position: currentPosition, value: firstValue };
     }
 
+    if (block.type === "arduinoSetPin") {
+      const pin = block.inputs?.[0] ?? 13;
+      const state = block.inputs?.[1] ?? "HIGH";
+      await sendArduino(`PIN ${pin} ${String(state).toUpperCase()}`, setSerialOutput);
+      setStatus(`Pin ${pin} set to ${String(state).toUpperCase()}`);
+      return { position: currentPosition, value: firstValue };
+    }
+
+    if (block.type === "arduinoTogglePin") {
+      const pin = block.inputs?.[0] ?? 13;
+      await sendArduino(`TOGGLE ${pin}`, setSerialOutput);
+      setStatus(`Toggled pin ${pin}`);
+      return { position: currentPosition, value: firstValue };
+    }
+
+    if (block.type === "arduinoBlink") {
+      const pin = block.inputs?.[0] ?? 13;
+      const duration = block.inputs?.[1] ?? 500;
+      await sendArduino(`BLINK ${pin} ${duration}`, setSerialOutput);
+      setStatus(`Blinking pin ${pin} for ${duration} ms`);
+      return { position: currentPosition, value: firstValue };
+    }
+
     if (block.type === "whenHear") {
       const targetPhrase = firstValue ?? "hello";
       setStatus(`Listening for "${targetPhrase}"...`);
@@ -377,447 +413,471 @@ export function useScratchApp() {
         setStatus(`Timeout: didn't hear "${targetPhrase}"`);
       }
 
-      return currentPosition;
+      return { position: currentPosition, value: firstValue };
     }
 
     return { position: currentPosition, value: firstValue, conditionResult };
+}
+
+async function executeBlockList(blockList, currentPosition) {
+  let nextPosition = currentPosition;
+
+  for (const nestedBlock of blockList) {
+    if (!runningRef.current) break;
+
+    setActiveBlockId(nestedBlock.id);
+    const result = await executeBlock(nestedBlock, nextPosition);
+    nextPosition = result.position;
+    setPosition(nextPosition);
+    await wait(0.25);
   }
 
-  async function executeBlockList(blockList, currentPosition) {
-    let nextPosition = currentPosition;
+  return nextPosition;
+}
 
-    for (const nestedBlock of blockList) {
-      if (!runningRef.current) break;
+async function executeRepeatedBlock(blockList, currentPosition, count) {
+  let nextPosition = currentPosition;
 
-      setActiveBlockId(nestedBlock.id);
-      const result = await executeBlock(nestedBlock, nextPosition);
-      nextPosition = result.position;
-      setPosition(nextPosition);
-      await wait(0.25);
-    }
-
-    return nextPosition;
+  for (let iteration = 0; iteration < count; iteration += 1) {
+    if (!runningRef.current) break;
+    nextPosition = await executeBlockList(blockList, nextPosition);
   }
 
-  async function executeRepeatedBlock(blockList, currentPosition, count) {
-    let nextPosition = currentPosition;
+  return nextPosition;
+}
 
-    for (let iteration = 0; iteration < count; iteration += 1) {
-      if (!runningRef.current) break;
-      nextPosition = await executeBlockList(blockList, nextPosition);
+async function runScript() {
+  if (runningRef.current) return;
+
+  runningRef.current = true;
+  setStatus("Running");
+  setActiveBlockId(null);
+  resetSprite();
+
+  // Start voice listening if there are voice blocks
+  const hasVoiceBlocks = blocks.some(block => block.category === "voice");
+  if (hasVoiceBlocks && isSpeechRecognitionSupported()) {
+    try {
+      startListening();
+      setVoiceListening(true);
+    } catch (error) {
+      console.error("Failed to start voice recognition:", error);
+      setStatus("Voice recognition not available");
     }
-
-    return nextPosition;
   }
 
-  async function runScript() {
-    if (runningRef.current) return;
+  let currentPosition = initialPosition;
+  for (let index = 0; index < blocks.length; index += 1) {
+    if (!runningRef.current) break;
 
-    runningRef.current = true;
-    setStatus("Running");
-    setActiveBlockId(null);
-    resetSprite();
-
-    // Start voice listening if there are voice blocks
-    const hasVoiceBlocks = blocks.some(block => block.category === "voice");
-    if (hasVoiceBlocks && isSpeechRecognitionSupported()) {
-      try {
-        startListening();
-        setVoiceListening(true);
-      } catch (error) {
-        console.error("Failed to start voice recognition:", error);
-        setStatus("Voice recognition not available");
-      }
+    const block = blocks[index];
+    setActiveBlockId(block.id);
+    let result;
+    try {
+      result = await executeBlock(block, currentPosition);
+    } catch (error) {
+      console.error("Block execution failed:", error);
+      setStatus(error?.message || "Block failed");
+      runningRef.current = false;
+      break;
     }
+    currentPosition = result.position;
+    setPosition(currentPosition);
 
-    let currentPosition = initialPosition;
-    for (let index = 0; index < blocks.length; index += 1) {
-      if (!runningRef.current) break;
+    if (block.type === "repeat") {
+      const repeatCount = Math.max(0, Math.floor(Number(result.value || 0)));
+      const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
+      const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
 
-      const block = blocks[index];
-      setActiveBlockId(block.id);
-      const result = await executeBlock(block, currentPosition);
-      currentPosition = result.position;
-      setPosition(currentPosition);
+      if (repeatCount > 0 && childBlocks.length > 0) {
+        const body = Array.isArray(block.children) && block.children.length > 0
+          ? block.children
+          : blocks.slice(index + 1, bodyEndIndex);
+        currentPosition = await executeRepeatedBlock(body, currentPosition, repeatCount);
 
-      if (block.type === "repeat") {
-        const repeatCount = Math.max(0, Math.floor(Number(result.value || 0)));
-        const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
-        const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
-
-        if (repeatCount > 0 && childBlocks.length > 0) {
-          const body = Array.isArray(block.children) && block.children.length > 0
-            ? block.children
-            : blocks.slice(index + 1, bodyEndIndex);
-          currentPosition = await executeRepeatedBlock(body, currentPosition, repeatCount);
-
-          if (!Array.isArray(block.children) || block.children.length === 0) {
-            index = bodyEndIndex - 1;
-          }
-        }
-      }
-
-      if (block.type === "if") {
-        const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
-        const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
-
-        if (result.conditionResult) {
-          if (childBlocks.length > 0) {
-            const body = Array.isArray(block.children) && block.children.length > 0
-              ? block.children
-              : blocks.slice(index + 1, bodyEndIndex);
-            currentPosition = await executeBlockList(body, currentPosition);
-          }
-        } else if (!Array.isArray(block.children) || block.children.length === 0) {
+        if (!Array.isArray(block.children) || block.children.length === 0) {
           index = bodyEndIndex - 1;
         }
       }
-
-      await wait(0.25);
     }
 
-    runningRef.current = false;
-    setActiveBlockId(null);
-    setVoiceListening(false);
-    stopListening();
-    setStatus("Ready");
-  }
+    if (block.type === "forever") {
+      const hasNestedChildren = Array.isArray(block.children) && block.children.length > 0;
+      const childBlocks = hasNestedChildren ? block.children : blocks.slice(index + 1);
+      const bodyEndIndex = hasNestedChildren ? index + 1 : getControlBodyEnd(index + 1);
+      const body = hasNestedChildren ? childBlocks : blocks.slice(index + 1, bodyEndIndex);
 
-  function stopScript() {
-    runningRef.current = false;
-    setActiveBlockId(null);
-    setVoiceListening(false);
-    stopListening();
-    setStatus("Stopped");
-  }
+      while (runningRef.current && body.length > 0) {
+        currentPosition = await executeBlockList(body, currentPosition);
+      }
 
-  function saveProject() {
-    localStorage.setItem("local-scratch-project", JSON.stringify(projectData()));
-    setStatus("Saved locally");
-  }
-
-  function loadSavedProject() {
-    const raw = localStorage.getItem("local-scratch-project");
-    if (!raw) {
-      setStatus("No saved project");
-      return;
+      if (!hasNestedChildren) {
+        index = bodyEndIndex - 1;
+      }
     }
 
-    try {
-      loadProject(JSON.parse(raw));
-      setStatus("Loaded locally");
-    } catch {
-      setStatus("Could not load project");
+    if (block.type === "if") {
+      const childBlocks = Array.isArray(block.children) && block.children.length > 0 ? block.children : blocks.slice(index + 1);
+      const bodyEndIndex = Array.isArray(block.children) && block.children.length > 0 ? index + 1 : getControlBodyEnd(index + 1);
+
+      if (result.conditionResult) {
+        if (childBlocks.length > 0) {
+          const body = Array.isArray(block.children) && block.children.length > 0
+            ? block.children
+            : blocks.slice(index + 1, bodyEndIndex);
+          currentPosition = await executeBlockList(body, currentPosition);
+        }
+      } else if (!Array.isArray(block.children) || block.children.length === 0) {
+        index = bodyEndIndex - 1;
+      }
     }
+
+    await wait(0.25);
   }
 
-  function handleDrop(event) {
-    event.preventDefault();
-    setDragOver(false);
+  runningRef.current = false;
+  setActiveBlockId(null);
+  setVoiceListening(false);
+  stopListening();
+  setStatus("Ready");
+}
 
-    const item = blockFromDrop(event);
-    if (item) addToScript(item.type, item.category);
+function stopScript() {
+  runningRef.current = false;
+  setActiveBlockId(null);
+  setVoiceListening(false);
+  stopListening();
+  setStatus("Stopped");
+}
+
+function saveProject() {
+  localStorage.setItem("local-scratch-project", JSON.stringify(projectData()));
+  setStatus("Saved locally");
+}
+
+function loadSavedProject() {
+  const raw = localStorage.getItem("local-scratch-project");
+  if (!raw) {
+    setStatus("No saved project");
+    return;
   }
 
-  function replaceConditionInside(
-    condition,
-    targetConditionId,
-    newCondition
+  try {
+    loadProject(JSON.parse(raw));
+    setStatus("Loaded locally");
+  } catch {
+    setStatus("Could not load project");
+  }
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  setDragOver(false);
+
+  const item = blockFromDrop(event);
+  if (item) addToScript(item.type, item.category);
+}
+
+function replaceConditionInside(
+  condition,
+  targetConditionId,
+  newCondition
+) {
+  if (!condition) return condition;
+
+  if (
+    condition.id === targetConditionId &&
+    condition.type === "not"
   ) {
-    if (!condition) return condition;
+    return {
+      ...condition,
+      condition: newCondition,
+    };
+  }
 
-    if (
-      condition.id === targetConditionId &&
-      condition.type === "not"
-    ) {
-      return {
-        ...condition,
-        condition: newCondition,
-      };
-    }
+  if (condition.condition) {
+    return {
+      ...condition,
+      condition: replaceConditionInside(
+        condition.condition,
+        targetConditionId,
+        newCondition
+      ),
+    };
+  }
 
-    if (condition.condition) {
+  return condition;
+}
+
+function serializeCondition(condition) {
+  if (!condition) return null;
+
+  return {
+    type: condition.type,
+    category: condition.category,
+    inputs: condition.inputs,
+    condition: serializeCondition(condition.condition),
+  };
+}
+
+
+function dropCondition(
+  blockId,
+  conditionType,
+  targetConditionId = null
+) {
+  const newCondition = createCondition(conditionType);
+
+  if (!newCondition) return;
+
+  setBlocks((currentBlocks) =>
+    updateBlockTree(currentBlocks, blockId, (block) => {
+      if (!targetConditionId) {
+        return {
+          ...block,
+          condition: newCondition,
+        };
+      }
+
       return {
-        ...condition,
+        ...block,
         condition: replaceConditionInside(
-          condition.condition,
+          block.condition,
           targetConditionId,
           newCondition
         ),
       };
-    }
+    })
+  );
+}
 
-    return condition;
-  }
+function updateNestedCondition(
+  condition,
+  conditionId,
+  inputIndex,
+  value
+) {
+  if (!condition) return condition;
 
-  function serializeCondition(condition) {
-    if (!condition) return null;
-
+  if (condition.id === conditionId) {
     return {
-      type: condition.type,
-      category: condition.category,
-      inputs: condition.inputs,
-      condition: serializeCondition(condition.condition),
+      ...condition,
+      inputs: condition.inputs.map((input, index) =>
+        index === inputIndex ? value : input
+      ),
     };
   }
 
-
-  function dropCondition(
-    blockId,
-    conditionType,
-    targetConditionId = null
-  ) {
-    const newCondition = createCondition(conditionType);
-
-    if (!newCondition) return;
-
-    setBlocks((currentBlocks) =>
-      updateBlockTree(currentBlocks, blockId, (block) => {
-        if (!targetConditionId) {
-          return {
-            ...block,
-            condition: newCondition,
-          };
-        }
-
-        return {
-          ...block,
-          condition: replaceConditionInside(
-            block.condition,
-            targetConditionId,
-            newCondition
-          ),
-        };
-      })
-    );
+  if (condition.condition) {
+    return {
+      ...condition,
+      condition: updateNestedCondition(
+        condition.condition,
+        conditionId,
+        inputIndex,
+        value
+      ),
+    };
   }
 
-  function updateNestedCondition(
-    condition,
-    conditionId,
-    inputIndex,
-    value
-  ) {
-    if (!condition) return condition;
+  return condition;
+}
 
-    if (condition.id === conditionId) {
-      return {
-        ...condition,
-        inputs: condition.inputs.map((input, index) =>
-          index === inputIndex ? value : input
-        ),
-      };
-    }
+function updateConditionInput(
+  blockId,
+  conditionId,
+  inputIndex,
+  value
+) {
+  setBlocks((currentBlocks) =>
+    updateBlockTree(currentBlocks, blockId, (block) => ({
+      ...block,
+      condition: updateNestedCondition(
+        block.condition,
+        conditionId,
+        inputIndex,
+        value
+      ),
+    }))
+  );
+}
 
-    if (condition.condition) {
-      return {
-        ...condition,
-        condition: updateNestedCondition(
-          condition.condition,
-          conditionId,
-          inputIndex,
-          value
-        ),
-      };
-    }
+function updateNestedConditionInputs(condition, conditionId, inputIndex, updater) {
+  if (!condition) return condition;
 
-    return condition;
+  if (condition.id === conditionId) {
+    return {
+      ...condition,
+      inputs: condition.inputs.map((input, index) => (index === inputIndex ? updater(input) : input)),
+    };
   }
 
-  function updateConditionInput(
-    blockId,
-    conditionId,
-    inputIndex,
-    value
-  ) {
-    setBlocks((currentBlocks) =>
-      updateBlockTree(currentBlocks, blockId, (block) => ({
-        ...block,
-        condition: updateNestedCondition(
-          block.condition,
-          conditionId,
-          inputIndex,
-          value
-        ),
-      }))
-    );
+  if (condition.condition) {
+    return {
+      ...condition,
+      condition: updateNestedConditionInputs(condition.condition, conditionId, inputIndex, updater),
+    };
   }
 
-  function updateNestedConditionInputs(condition, conditionId, inputIndex, updater) {
-    if (!condition) return condition;
+  return condition;
+}
 
-    if (condition.id === conditionId) {
-      return {
-        ...condition,
-        inputs: condition.inputs.map((input, index) => (index === inputIndex ? updater(input) : input)),
-      };
-    }
+function updateNestedConditionSelf(condition, conditionId, updater) {
+  if (!condition) return condition;
+  if (condition.id === conditionId) return updater(condition);
 
-    if (condition.condition) {
-      return {
-        ...condition,
-        condition: updateNestedConditionInputs(condition.condition, conditionId, inputIndex, updater),
-      };
-    }
-
-    return condition;
+  if (condition.condition) {
+    return { ...condition, condition: updateNestedConditionSelf(condition.condition, conditionId, updater) };
   }
 
-  function updateNestedConditionSelf(condition, conditionId, updater) {
-    if (!condition) return condition;
-    if (condition.id === conditionId) return updater(condition);
+  return condition;
+}
 
-    if (condition.condition) {
-      return { ...condition, condition: updateNestedConditionSelf(condition.condition, conditionId, updater) };
-    }
+function dropConditionAIValue(blockId, conditionId, inputIndex, kind) {
+  setBlocks((currentBlocks) =>
+    updateBlockTree(currentBlocks, blockId, (block) => ({
+      ...block,
+      condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, () => createAIValue(kind)),
+    }))
+  );
+}
 
-    return condition;
+function updateConditionAIPrompt(blockId, conditionId, inputIndex, prompt) {
+  setBlocks((currentBlocks) =>
+    updateBlockTree(currentBlocks, blockId, (block) => ({
+      ...block,
+      condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, (input) =>
+        isAIValue(input) ? { ...input, prompt, lastAnswer: null } : input,
+      ),
+    }))
+  );
+}
+
+function clearConditionAIValue(blockId, conditionId, inputIndex, defaultValue) {
+  setBlocks((currentBlocks) =>
+    updateBlockTree(currentBlocks, blockId, (block) => ({
+      ...block,
+      condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, () => defaultValue),
+    }))
+  );
+}
+
+async function resolveConditionInputValue(blockId, condition, index) {
+  const raw = condition.inputs?.[index];
+  if (!isAIValue(raw)) return raw;
+
+  setStatus("Asking AI\u2026");
+  const answer = await askAI(raw.prompt, raw.kind);
+  const resolved = raw.kind === "number" ? Number(answer) : answer;
+  const displayAnswer = raw.kind === "number" ? String(Number.isNaN(resolved) ? 0 : resolved) : answer;
+
+  setBlocks((currentBlocks) =>
+    updateBlockTree(currentBlocks, blockId, (block) => ({
+      ...block,
+      condition: updateNestedConditionInputs(block.condition, condition.id, index, (input) =>
+        isAIValue(input) ? { ...input, lastAnswer: displayAnswer } : input,
+      ),
+    })),
+  );
+
+  return raw.kind === "number" ? (Number.isNaN(resolved) ? 0 : resolved) : resolved;
+}
+
+async function resolveConditionToBoolean(blockId, condition) {
+  if (!condition) return false;
+
+  if (condition.type === "not") {
+    return !(await resolveConditionToBoolean(blockId, condition.condition));
   }
 
-  function dropConditionAIValue(blockId, conditionId, inputIndex, kind) {
-    setBlocks((currentBlocks) =>
-      updateBlockTree(currentBlocks, blockId, (block) => ({
-        ...block,
-        condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, () => createAIValue(kind)),
-      }))
-    );
-  }
-
-  function updateConditionAIPrompt(blockId, conditionId, inputIndex, prompt) {
-    setBlocks((currentBlocks) =>
-      updateBlockTree(currentBlocks, blockId, (block) => ({
-        ...block,
-        condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, (input) =>
-          isAIValue(input) ? { ...input, prompt, lastAnswer: null } : input,
-        ),
-      }))
-    );
-  }
-
-  function clearConditionAIValue(blockId, conditionId, inputIndex, defaultValue) {
-    setBlocks((currentBlocks) =>
-      updateBlockTree(currentBlocks, blockId, (block) => ({
-        ...block,
-        condition: updateNestedConditionInputs(block.condition, conditionId, inputIndex, () => defaultValue),
-      }))
-    );
-  }
-
-  async function resolveConditionInputValue(blockId, condition, index) {
-    const raw = condition.inputs?.[index];
-    if (!isAIValue(raw)) return raw;
-
+  if (condition.type === "aiCondition") {
+    const prompt = await resolveConditionInputValue(blockId, condition, 0);
     setStatus("Asking AI\u2026");
-    const answer = await askAI(raw.prompt, raw.kind);
-    const resolved = raw.kind === "number" ? Number(answer) : answer;
-    const displayAnswer = raw.kind === "number" ? String(Number.isNaN(resolved) ? 0 : resolved) : answer;
+    const answer = await askAI(String(prompt ?? ""), "boolean");
 
     setBlocks((currentBlocks) =>
       updateBlockTree(currentBlocks, blockId, (block) => ({
         ...block,
-        condition: updateNestedConditionInputs(block.condition, condition.id, index, (input) =>
-          isAIValue(input) ? { ...input, lastAnswer: displayAnswer } : input,
-        ),
+        condition: updateNestedConditionSelf(block.condition, condition.id, (node) => ({ ...node, lastAnswer: answer })),
       })),
     );
 
-    return raw.kind === "number" ? (Number.isNaN(resolved) ? 0 : resolved) : resolved;
+    return /^(true|yes)/i.test(String(answer).trim());
   }
 
-  async function resolveConditionToBoolean(blockId, condition) {
-    if (!condition) return false;
-
-    if (condition.type === "not") {
-      return !(await resolveConditionToBoolean(blockId, condition.condition));
-    }
-
-    if (condition.type === "aiCondition") {
-      const prompt = await resolveConditionInputValue(blockId, condition, 0);
-      setStatus("Asking AI\u2026");
-      const answer = await askAI(String(prompt ?? ""), "boolean");
-
-      setBlocks((currentBlocks) =>
-        updateBlockTree(currentBlocks, blockId, (block) => ({
-          ...block,
-          condition: updateNestedConditionSelf(block.condition, condition.id, (node) => ({ ...node, lastAnswer: answer })),
-        })),
-      );
-
-      return /^(true|yes)/i.test(String(answer).trim());
-    }
-
-    if (condition.type === "greaterThan" || condition.type === "lessThan") {
-      const left = await resolveConditionInputValue(blockId, condition, 0);
-      const right = await resolveConditionInputValue(blockId, condition, 1);
-      return condition.type === "greaterThan" ? Number(left || 0) > Number(right || 0) : Number(left || 0) < Number(right || 0);
-    }
-
-    if (condition.type === "keyPressed") {
-      const key = await resolveConditionInputValue(blockId, condition, 0);
-      return isKeyPressed(key);
-    }
-
-    return false;
+  if (condition.type === "greaterThan" || condition.type === "lessThan") {
+    const left = await resolveConditionInputValue(blockId, condition, 0);
+    const right = await resolveConditionInputValue(blockId, condition, 1);
+    return condition.type === "greaterThan" ? Number(left || 0) > Number(right || 0) : Number(left || 0) < Number(right || 0);
   }
 
-  return {
-    activeBlockId,
-    addToScript,
-    blocks,
-    category,
-    clearBlocks,
-    deleteBlock,
-    dragOver,
-    dropCondition,
-    handleDrop,
-    loadSavedProject,
-    paletteBlocks,
-    position,
-    projectName,
-    resetSprite,
-    runScript,
-    saveProject,
-    setCategory,
-    setDragOver,
-    setProjectName,
-    setSpriteName,
-    speech,
-    spriteHidden,
-    spriteName,
-    status,
-    stopScript,
-    updateBlockInput,
-    updateConditionInput,
-    dropAIValue,
-    updateAIPrompt,
-    clearAIValue,
-    dropConditionAIValue,
-    updateConditionAIPrompt,
-    clearConditionAIValue,
+  if (condition.type === "keyPressed") {
+    const key = await resolveConditionInputValue(blockId, condition, 0);
+    return isKeyPressed(key);
+  }
 
-    arduinoConnected,
-    serialOutput,
-    clearSerial: () => setSerialOutput([]),
-    voiceListening,
+  return false;
+}
 
-    connectArduino: async () => {
-      try {
-        await connectArduino(setSerialOutput);
-        setArduinoConnected(true);
-        setStatus("Arduino connected");
-      } catch (error) {
-        setStatus(error?.message || "Could not connect Arduino");
-      }
-    },
+return {
+  activeBlockId,
+  addToScript,
+  blocks,
+  category,
+  clearBlocks,
+  deleteBlock,
+  dragOver,
+  dropCondition,
+  handleDrop,
+  loadSavedProject,
+  paletteBlocks,
+  position,
+  projectName,
+  resetSprite,
+  runScript,
+  saveProject,
+  setCategory,
+  setDragOver,
+  setProjectName,
+  setSpriteName,
+  speech,
+  spriteHidden,
+  spriteName,
+  spriteImage,
+  status,
+  stopScript,
+  updateBlockInput,
+  updateConditionInput,
+  dropAIValue,
+  updateAIPrompt,
+  clearAIValue,
+  dropConditionAIValue,
+  updateConditionAIPrompt,
+  clearConditionAIValue,
 
-    disconnectArduino: async () => {
-      try {
-        await disconnectArduino();
-        setArduinoConnected(false);
-        setStatus("Arduino disconnected");
-      } catch (error) {
-        setStatus(error?.message || "Could not disconnect Arduino");
-      }
-    },
-  };
+  arduinoConnected,
+  serialOutput,
+  clearSerial: () => setSerialOutput([]),
+  voiceListening,
+
+  connectArduino: async () => {
+    try {
+      await connectArduino(setSerialOutput);
+      setArduinoConnected(true);
+      setStatus("Arduino connected");
+    } catch (error) {
+      setStatus(error?.message || "Could not connect Arduino");
+    }
+  },
+
+  disconnectArduino: async () => {
+    try {
+      await disconnectArduino();
+      setArduinoConnected(false);
+      setStatus("Arduino disconnected");
+    } catch (error) {
+      setStatus(error?.message || "Could not disconnect Arduino");
+    }
+  },
+};
 }

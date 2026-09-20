@@ -203,7 +203,7 @@ export function Block({
     onConditionDrop(block.id, item.type);
   }
 
-  const canWrapChildren = !paletteBlock && ["repeat", "if", "waitUntil", "whenHear"].includes(block.type);
+  const canWrapChildren = !paletteBlock && ["repeat", "forever", "if", "waitUntil", "whenHear"].includes(block.type);
 
   return (
     <div

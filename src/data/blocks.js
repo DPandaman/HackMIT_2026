@@ -12,6 +12,7 @@ export const blockDefinitions = {
   control: [
     { type: "wait", template: ["wait ", { value: "1", type: "number", min: "0", step: "0.1" }, " seconds"] },
     { type: "repeat", template: ["repeat ", { value: "2", type: "number", min: "1" }, " times"] },
+    { type: "forever", template: ["forever"] },
     { type: "if", template: ["if ", { socket: "condition" }, " then"] },
     { type: "waitUntil", template: ["wait until ", { socket: "condition" }] },
   ],
@@ -56,11 +57,15 @@ export const blockDefinitions = {
   events: [
     { type: "flag", template: ["when 🚩 clicked"] },
   ],
-
   hardware: [
     {
       type: "arduinoConnect",
       template: ["connect Arduino"],
+    },
+
+    {
+      type: "arduinoDisconnect",
+      template: ["disconnect Arduino"],
     },
 
     {
@@ -73,14 +78,45 @@ export const blockDefinitions = {
     },
 
     {
-      type: "arduinoDisconnect",
-      template: ["disconnect Arduino"],
-    }
+      type: "arduinoSetPin",
+      template: [
+        "set pin ",
+        { value: "13", type: "number", min: "0" },
+        " to ",
+        { value: "HIGH", type: "text" },
+      ],
+    },
+
+    {
+      type: "arduinoTogglePin",
+      template: [
+        "toggle pin ",
+        { value: "13", type: "number", min: "0" },
+      ],
+    },
+
+    {
+      type: "arduinoBlink",
+      template: [
+        "blink pin ",
+        { value: "13", type: "number", min: "0" },
+        " for ",
+        { value: "500", type: "number", min: "0" },
+        " ms",
+      ],
+    },
   ],
   ai: [
     {
       type: "askAI",
       template: ["ask AI ", { value: "What should the sprite say?", type: "text" }, " and say the answer"],
+    },
+    {
+      type: "generateImage",
+      template: [
+        "generate image ",
+        { value: "a robot playing soccer", type: "text" },
+      ],
     },
   ],
 

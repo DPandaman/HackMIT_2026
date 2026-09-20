@@ -58,6 +58,7 @@ export function wait(seconds) {
 }
 
 const AI_ENDPOINT = "/api/ask";
+const IMAGE_ENDPOINT = "/api/generate-image";
 
 export async function askAI(prompt, kind = "text") {
   const trimmedPrompt = (prompt || "").trim();
@@ -81,6 +82,24 @@ export async function askAI(prompt, kind = "text") {
     console.error("askAI error:", error);
     return kind === "number" ? "0" : "(AI is unavailable right now)";
   }
+}
+
+export async function generateImage(prompt) {
+  const trimmedPrompt = (prompt || "").trim();
+  if (!trimmedPrompt) throw new Error("Image prompt is required.");
+
+  const response = await fetch(IMAGE_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: trimmedPrompt }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `Image request failed (${response.status})`);
+  }
+  if (!data.image) throw new Error("Image service returned no image.");
+  return data.image;
 }
 
 export async function connectArduino(setSerialOutput) {
