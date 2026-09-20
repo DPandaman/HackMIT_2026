@@ -3,7 +3,7 @@ export function Topbar({ projectName, resetSprite, saveProject, loadProject, run
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">🐱</span>
-        <strong>Local Scratch</strong>
+        <strong>Tickle</strong>
       </div>
       <div
         className="project-name"
