@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState } from "react";
 import { blockDefinitions, defaultInputs, findDefinition } from "../data/blocks";
 import { blockFromDrop, defaultConditionBlock, evaluateCondition, makeId, createCondition } from "../utils/blockHelpers";
-import { moveSprite, wait } from "../utils/runtime";
+import { moveSprite, wait, connectArduino, disconnectArduino, sendArduino, isArduinoConnected, } from "../utils/runtime";
 
 const initialPosition = { x: 50, y: 52, rotation: 0 };
+
 
 export function useScratchApp() {
   const [category, setCategory] = useState("motion");
@@ -16,6 +17,7 @@ export function useScratchApp() {
   const [speech, setSpeech] = useState("");
   const [status, setStatus] = useState("Ready");
   const [activeBlockId, setActiveBlockId] = useState(null);
+  const [arduinoConnected, setArduinoConnected] = useState(isArduinoConnected());
   const runningRef = useRef(false);
 
   const paletteBlocks = useMemo(
@@ -121,24 +123,7 @@ export function useScratchApp() {
     setSpeech("");
   }
 
-  // function projectData() {
-  //   return {
-  //     name: projectName.trim(),
-  //     spriteName,
-  //     blocks: blocks.map(({ type, category: blockCategory, inputs, condition }) => ({
-  //       type,
-  //       category: blockCategory,
-  //       inputs,
-  //       condition: condition
-  //         ? {
-  //           type: condition.type,
-  //           category: condition.category,
-  //           inputs: condition.inputs,
-  //         }
-  //         : null,
-  //     })),
-  //   };
-  // }
+
   function serializeBlock(block) {
     return {
       type: block.type,
@@ -208,16 +193,6 @@ export function useScratchApp() {
     };
   }
 
-  // function hydrateSavedCondition(item) {
-  //   if (!item.condition) return item.type === "if" ? defaultConditionBlock() : null;
-
-  //   return {
-  //     id: makeId(),
-  //     type: item.condition.type,
-  //     category: item.condition.category,
-  //     inputs: item.condition.inputs || [],
-  //   };
-  // }
   function hydrateSavedCondition(item) {
     if (!item.condition) {
       return item.type === "if"
@@ -251,6 +226,27 @@ export function useScratchApp() {
     }
     if (block.type === "if") {
       setStatus(evaluateCondition(block.condition) ? "If condition is true" : "If condition is false");
+    }
+
+    if (block.type === "arduinoConnect") {
+      await connectArduino();
+      setArduinoConnected(true);
+      setStatus("Arduino connected");
+      return currentPosition;
+    }
+
+    if (block.type === "arduinoSend") {
+      const message = block.inputs?.[0] ?? "";
+      await sendArduino(message);
+      setStatus(`Sent to Arduino: ${message}`);
+      return currentPosition;
+    }
+
+    if (block.type === "arduinoDisconnect") {
+      await disconnectArduino();
+      setArduinoConnected(false);
+      setStatus("Arduino disconnected");
+      return currentPosition;
     }
 
     return currentPosition;
@@ -374,26 +370,6 @@ export function useScratchApp() {
     if (item) addToScript(item.type, item.category);
   }
 
-  // function dropCondition(blockId, conditionType) {
-  //   const definition = findDefinition("condition", conditionType);
-  //   if (!definition) return;
-
-  //   setBlocks((currentBlocks) =>
-  //     currentBlocks.map((block) =>
-  //       block.id === blockId
-  //         ? {
-  //           ...block,
-  //           condition: {
-  //             id: makeId(),
-  //             type: conditionType,
-  //             category: "condition",
-  //             inputs: defaultInputs(definition),
-  //           },
-  //         }
-  //         : block,
-  //     ),
-  //   );
-  // }
   function replaceConditionInside(
     condition,
     targetConditionId,
@@ -499,21 +475,6 @@ export function useScratchApp() {
     return condition;
   }
 
-  // function updateConditionInput(blockId, conditionId, inputIndex, value) {
-  //   setBlocks((currentBlocks) =>
-  //     currentBlocks.map((block) =>
-  //       block.id === blockId && block.condition?.id === conditionId
-  //         ? {
-  //           ...block,
-  //           condition: {
-  //             ...block.condition,
-  //             inputs: block.condition.inputs.map((input, index) => (index === inputIndex ? value : input)),
-  //           },
-  //         }
-  //         : block,
-  //     ),
-  //   );
-  // }
   function updateConditionInput(
     blockId,
     conditionId,
@@ -561,5 +522,27 @@ export function useScratchApp() {
     stopScript,
     updateBlockInput,
     updateConditionInput,
+
+    arduinoConnected,
+
+    connectArduino: async () => {
+      try {
+        await connectArduino();
+        setArduinoConnected(true);
+        setStatus("Arduino connected");
+      } catch (error) {
+        setStatus(error?.message || "Could not connect Arduino");
+      }
+    },
+
+    disconnectArduino: async () => {
+      try {
+        await disconnectArduino();
+        setArduinoConnected(false);
+        setStatus("Arduino disconnected");
+      } catch (error) {
+        setStatus(error?.message || "Could not disconnect Arduino");
+      }
+    },
   };
 }
