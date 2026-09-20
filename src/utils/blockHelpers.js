@@ -108,3 +108,16 @@ export function blockFromDrop(event) {
     return null;
   }
 }
+
+export function isAIValue(value) {
+  return Boolean(value) && typeof value === "object" && value.ai === true;
+}
+
+export function createAIValue(kind = "text") {
+  return {
+    ai: true,
+    kind,
+    prompt: kind === "number" ? "pick a number between 1 and 20" : "what should it say?",
+    lastAnswer: null,
+  };
+}
